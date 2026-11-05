@@ -6,10 +6,9 @@ const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
 const {mkdtempSync,rmSync}=fs;
-const tmp=mkdtempSync(path.join(os.tmpdir(),'motokare-ui-test-'));
-process.env.DB_PATH=path.join(tmp,'test.sqlite');
-const {server}=require('../server/index');
-const js=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
+process.env.PG_SCHEMA='mk_test_'+require('node:crypto').randomBytes(6).toString('hex');
+const {server,ready,pool}=require('../server');
+const js=fs.readFileSync(path.join(__dirname,'../../frontend/app.js'),'utf8');
 function appSession(base,cookie,hash){
  const elements={ '#app':{innerHTML:''},'#modal-root':{innerHTML:''},'#toast-root':{innerHTML:''} };
  const classList={remove(){},toggle(){},add(){}};
@@ -30,7 +29,7 @@ async function send(base,url,method='GET',payload,cookie){const r=await fetch(ba
 const wait=async pred=>{for(let i=0;i<40;i++){if(pred())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out waiting for frontend render');};
 test('frontend HTML rendering uses server sessions, role-specific pages and real records',async t=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
- t.after(async()=>{await new Promise(resolve=>server.close(resolve));rmSync(tmp,{recursive:true,force:true});});
+ t.after(async()=>{await new Promise(resolve=>server.close(resolve));await pool.query(`DROP SCHEMA IF EXISTS "${process.env.PG_SCHEMA}" CASCADE`);await pool.end();});
  const rider=await send(base,'/api/auth/register','POST',{role:'rider',fullName:'Rider Test',email:'r@ui.test',password:'testPassword1234!'});assert.equal(rider.status,201);
  const bike=await send(base,'/api/bikes','POST',{model:'Kawasaki Model XYZ',year:2025,plate:'',odometer:1000},rider.cookie);assert.equal(bike.status,201);
  const riderPage=appSession(base,rider.cookie,'#/rider/dashboard');

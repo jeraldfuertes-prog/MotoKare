@@ -1,138 +1,111 @@
-# MotoKare — Phase 3 (Full-Stack Motorcycle Maintenance Web App)
+# MotoKare — PostgreSQL Full-Stack Web Application
 
-MotoKare is a web-based motorcycle maintenance tracking system for **riders (B2C)** and **repair shops (B2B)**, designed in a neon HUD / Sci-Fi FUI style.
-
-Phase 3 upgrades the Phase 1–2 frontend from fake sign-in and browser-only demo data to a **working local API with a persistent SQLite database**. No third-party services or npm dependencies are needed to run the app.
-
-## Prerequisites
-
-- **Node.js 22.13 or newer** (uses built-in `node:sqlite`; Node 22 may print an experimental-feature warning)
-- A modern browser
-
-## Quick start
-
-```bash
-git clone https://github.com/jeraldfuertes-prog/MotoKare.git
-cd MotoKare
-npm start
-```
-
-Open **http://127.0.0.1:3000**. Create your own **Rider** or **Workshop** account. The database will be created automatically at `data/motokare.sqlite`.
-
-No `npm install` is required. Do **not** open `index.html` with `file://` or run `python -m http.server`: the application needs its Node server for login and data requests.
-
-For development, use `npm run dev` (server restarts on edits). Run `npm test` for integration and frontend rendering tests.
-
-## What works
-
-**Accounts**: registration, real password login, secure server-side sessions, logout, user profile updates, password changes, role-specific permissions, and separate data for every account. Choose the correct B2C/B2B account type when signing in. Switching type signs out first.
-
-**Rider workspace**: create/edit/delete motorcycle profiles, select a bike, update its odometer, see maintenance reminders and estimated intervals, customize service intervals, record maintenance and associated expenses, view history and CSV exports.
-
-**Workshop workspace**: add/edit/delete customers, create/edit/delete service jobs, update job status, create/edit/delete appointments, confirm/complete appointments, dashboard metrics and CSV exports.
-
-**Persisted records**: all records above are stored in SQLite (not browser localStorage). They remain when the browser reloads and when the Node server restarts, as long as the database file remains. Only the selected motorcycle's ID is saved in the browser for convenience.
-
-**Reports and notifications**: API reports and schedule-based due/overdue indications, based on recorded mileage and dates. Notifications are **inside the web application**; no emails, SMS, push messages, or real-time motorcycle sensor readings are included.
+MotoKare is a responsive HUD / Sci-Fi motorcycle-maintenance application with two distinct account types: **motorcycle owners (B2C)** and **repair shops (B2B)**. Its frontend remains in plain HTML/CSS/JavaScript; its backend is Node.js with PostgreSQL using the official `pg` driver.
 
 ## Folder structure
 
 ```text
 MotoKare/
-├── index.html             # HUD/FUI UI shell
-├── styles.css             # Responsive theme and accessible focus/motion styles
-├── app.js                 # Frontend routing and REST API integration
-├── server/
-│   ├── index.js           # Node HTTP server, API, validation and authentication
-│   └── db.js              # SQLite schema and database queries
-├── tests/
-│   ├── api.test.js        # End-to-end HTTP/API integration tests
-│   └── frontend.test.js   # Frontend rendering/session integration tests
-├── .gitignore
+├── frontend/
+│   ├── index.html          # Public SPA shell and login/registration
+│   ├── styles.css          # Neon HUD theme, mobile responsive
+│   └── app.js              # Router, forms and API integration
+├── backend/
+│   ├── server.js           # REST API, authentication, static serving
+│   ├── db.js               # PostgreSQL pool, queries, transactions, bootstrap
+│   ├── schema.sql          # Tables and indexes, initialized on startup
+│   ├── scripts/
+│   │   └── migrate-sqlite.js  # Optional one-time SQLite data import
+│   └── tests/
+│       ├── api.test.js
+│       ├── frontend.test.js
+│       └── browser_smoke.py    # Optional Playwright smoke test
+├── docker-compose.yml     # Local PostgreSQL 16
 ├── .env.example
+├── .gitignore
 ├── package.json
 └── README.md
 ```
 
-## API reference
+## Quick start (VS Code, Windows/macOS/Linux)
 
-JSON API served on the same origin at `/api`. For POST, PATCH and DELETE requests send:
-
-```http
-Content-Type: application/json
-X-MotoKare-Client: web
-```
-
-Authentication is carried by a server-issued, `HttpOnly`, `SameSite=Lax` session cookie. The cookie is scoped to `/api`. Do not store passwords or tokens in localStorage. Requests from the frontend automatically send this cookie.
-
-| Method | Route | Access | Purpose |
-|---|---|---|---|
-| GET | `/api/health` | Public | Server health |
-| POST | `/api/auth/register` | Public | Register rider/shop |
-| POST | `/api/auth/login` | Public | Login |
-| POST | `/api/auth/logout` | Any | Revoke current session |
-| GET | `/api/auth/me` | Signed in | Signed-in account |
-| GET | `/api/bootstrap` | Signed in | Load user's whole dashboard state |
-| PATCH | `/api/me` | Signed in | Edit profile and workshop name |
-| PATCH | `/api/me/password` | Signed in | Change password and revoke other sessions |
-| GET, POST | `/api/bikes` | Rider | List/create motorcycles |
-| PATCH, DELETE | `/api/bikes/:id` | Owner rider | Edit/delete bike |
-| PATCH | `/api/bikes/:id/odometer` | Owner rider | Update recorded mileage |
-| GET | `/api/components` | Rider | Maintenance components |
-| PATCH | `/api/components/:id` | Owner rider | Change service interval/due date |
-| GET, POST | `/api/services` | Rider | List/add service records |
-| DELETE | `/api/services/:id` | Owner rider | Delete history record (interval not reversed) |
-| GET, POST | `/api/customers` | Shop | List/create customer records |
-| PATCH, DELETE | `/api/customers/:id` | Owner shop | Edit/delete customer |
-| GET, POST | `/api/jobs` | Shop | List/create service jobs |
-| PATCH, DELETE | `/api/jobs/:id` | Owner shop | Edit, progress, or delete job |
-| GET, POST | `/api/appointments` | Shop | List/create bookings |
-| PATCH, DELETE | `/api/appointments/:id` | Owner shop | Edit, update status, delete |
-| GET | `/api/reports` | Signed in | Account-specific summary |
-| GET | `/api/notifications` | Signed in | Due/overdue and booking alerts |
-
-Successful responses are JSON; failed responses include `{ "error": "..." }` with an appropriate HTTP status (400/401/403/404/409/429, etc.). The API enforces record ownership; IDs from other accounts cannot be accessed.
-
-## Configuration
-
-Read `.env.example` for defaults. Environment variables are read directly by Node, not from `.env` files:
-
-| Variable | Default | Description |
-|---|---|---|
-| `HOST` | `127.0.0.1` | Bind address; `0.0.0.0` for an explicitly secured remote host |
-| `PORT` | `3000` | Web server port |
-| `DB_PATH` | `./data/motokare.sqlite` | Persistent SQLite file |
-| `COOKIE_SECURE` | unset | Set `1` when serving behind **HTTPS** and a trusted proxy |
-
-Example on macOS/Linux:
+**You need:** Node.js 22.13 or newer, npm, and PostgreSQL 16 or newer (or Docker Desktop with Compose).
 
 ```bash
-HOST=127.0.0.1 PORT=3000 DB_PATH=./data/motokare.sqlite npm start
+# Clone the repository (skip if already cloned; use git pull instead)
+git clone https://github.com/jeraldfuertes-prog/MotoKare.git
+cd MotoKare
+
+# Start the PostgreSQL container (requires Docker Desktop / Docker Engine)
+docker compose up -d db
+
+# Install Node.js dependencies
+npm install
 ```
 
-**Database backup:** stop the server before directly copying the SQLite database, or use a SQLite-aware backup method that handles write-ahead logging. Never commit `data/`, `.env`, or backups containing personal information to GitHub.
-
-## Security and project boundaries
-
-- Passwords are hashed with scrypt and unique random salts; sessions are cryptographically random server-side records identified by hashed cookie tokens.
-- Sessions expire after 7 days. Logout invalidates the session; password change revokes other sessions.
-- Incoming fields are validated and records are queried with SQL parameters and ownership constraints.
-- JSON mutations require a custom CSRF header and same-origin `Origin` checks; cross-origin CORS access is not enabled.
-- HTTP security headers and an allowlist of static files protect the web app. The database is **never** exposed through the static server.
-- The demo visual style, profile/mileage functions, and other pages are retained from the Phase 1–2 UI.
-
-**This release is a working local full-stack MVP, not a production-audited deployment.** Production launch still requires HTTPS hosting, operational backups, monitoring, account recovery/email verification, email/SMS/push delivery if wanted, and independent security/accessibility testing. The current workshop and rider data are intentionally **separate**; shared records between a particular rider and a particular repair shop would require an explicit consent-based linking workflow. Price proposals are informational only: no payment processor exists. Maintenance schedules are estimates and must be compared to the motorcycle manufacturer's manual.
-
-## Tests
+Create your own `.env` by copying `.env.example` (Windows PowerShell: `Copy-Item .env.example .env`; macOS/Linux: `cp .env.example .env`), then run:
 
 ```bash
+npm start
+```
+
+Open **http://127.0.0.1:3000**. PostgreSQL tables are created automatically at server startup. Register a new rider or shop account to use the system. The Node server serves files from `frontend/` as well as `/api/*`, so the browser and API share the same origin and session cookies work.
+
+**No Docker?** Install PostgreSQL locally, create a database/user with suitable permissions, and update `DATABASE_URL` in `.env`. Do not publish `.env` or store real credentials in Git. Cloud-hosted PostgreSQL works with a provider-specific connection URL and TLS settings appropriate to that provider.
+
+## Run checks and API tests
+
+```bash
+npm run check
 npm test
 ```
 
-Node's built-in test runner checks registration, login/logout, profile changes, passwords, database persistence, rider operations, shop operations, cross-role and cross-user restrictions, CSRF rejection, and frontend rendering using server sessions.
+The Node test suite connects to **a real PostgreSQL server** via `DATABASE_URL`. It creates randomly named test schemas and deletes them after running. Never point tests to a production database. The test suites cover registration/login/session cookies, rider and workshop CRUD, data ownership, CSRF checks, API reports, and frontend session-based rendering.
 
-An optional Playwright Chromium test is at `tests/browser_smoke.py`. It requires a local Chromium installation and Python Playwright; it is **not** part of `npm test`. The browser test could not be executed in the development environment because Chromium blocks local HTTP navigation there.
+`npm run check` performs syntax checks and does not need a running database. A browser-based Playwright smoke test is optional and requires separate Playwright installation. 
 
-## Project ownership
+## Main features
 
-MotoKare is an original academic web application designed for the MotoKare project; RideCheck served only as functional and UI/UX inspiration. The source code does not copy RideCheck's assets, source code, or brand.
+- **Accounts:** registration, login, logout, password change, profile editing; server-side sessions; rider/shop role boundaries.
+- **Rider:** motorcycle profiles, odometer updates, maintenance component intervals, due/overdue indicators, service history and expenses.
+- **Workshop:** customers, service jobs, service statuses, appointments, financial/workload reports.
+- **Persistence:** all records are stored in PostgreSQL; no browser-only fake authentication.
+- **Frontend:** the original MotoKare HUD visual design and route/navigation behavior are preserved.
+
+## API endpoints
+
+| Method | Path | Role |
+|---|---|---|
+| GET | `/api/health` | Public |
+| POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | Public or session |
+| GET | `/api/auth/me`, `/api/bootstrap` | Session |
+| PATCH | `/api/me`, `/api/me/password` | Session |
+| GET, POST | `/api/bikes`, `/api/services`, `/api/customers`, `/api/jobs`, `/api/appointments` | Rider or workshop, according to resource |
+| PATCH, DELETE | `/api/bikes/:id`, `/api/components/:id`, `/api/customers/:id`, `/api/jobs/:id`, `/api/appointments/:id` | Record owner |
+| PATCH | `/api/bikes/:id/odometer` | Rider owner |
+| DELETE | `/api/services/:id` | Rider owner |
+| GET | `/api/components`, `/api/reports`, `/api/notifications` | Session / role-specific |
+
+Write requests use `Content-Type: application/json` and `X-MotoKare-Client: web`; the browser uses a server-issued `HttpOnly`, `SameSite=Lax` session cookie, not a token in localStorage. API responses remain compatible with the existing frontend.
+
+## Existing SQLite data? (optional migration)
+
+**New installations do not need this step.** If you previously used MotoKare Phase 3 and have an existing `data/motokare.sqlite`, back it up first, then start PostgreSQL and run:
+
+```bash
+npm run migrate:sqlite -- ./data/motokare.sqlite
+```
+
+This copies users (including existing scrypt password hashes), motorcycles, maintenance components, service history, workshop customers, jobs, and appointments into PostgreSQL. Existing sessions are **not** imported; users sign in again. The import runs in a single PostgreSQL transaction and uses `ON CONFLICT (id) DO NOTHING`, so re-running it doesn't duplicate records. **Do not delete or overwrite the original SQLite file until you have verified the data in PostgreSQL.**
+
+## Security and deployment notes
+
+- `DATABASE_URL` is required; the local Docker credentials are for **development only**.
+- Passwords are salted and hashed with `scrypt`; sessions are stored as hashes in PostgreSQL, with server-side expiration and revocation.
+- SQL statements use parameterized queries; create-bike and create-service operations use PostgreSQL transactions on the same pool client.
+- API endpoints restrict operations to the authenticated account, including independent rider/workshop workspaces.
+- Local PostgreSQL is bound to `127.0.0.1` in Docker Compose, not exposed publicly.
+- For production: rotate all secrets, host behind HTTPS, set `COOKIE_SECURE=1`, use managed PostgreSQL or configured backups, set up monitoring and audit logging, and arrange independent security testing.
+- This release has in-app maintenance reminders based on manually recorded mileage/date, not motorcycle sensor diagnostics or external email/SMS delivery. Rider and shop accounts do not share records without a future consent-based linking system.
+
+**Development status:** Frontend and API source have been migrated to PostgreSQL. Real PostgreSQL integration tests require a PostgreSQL instance; don't assume production readiness from syntax tests alone.

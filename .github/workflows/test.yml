@@ -1,0 +1,39 @@
+name: MotoKare PostgreSQL API and Frontend Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: motokare
+          POSTGRES_USER: motokare
+          POSTGRES_PASSWORD: motokare_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U motokare -d motokare"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://motokare:motokare_ci_password@127.0.0.1:5432/motokare
+      HOST: 127.0.0.1
+      COOKIE_SECURE: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check JavaScript syntax
+        run: npm run check
+      - name: Test backend API and frontend integration with PostgreSQL
+        run: npm test

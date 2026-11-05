@@ -4,10 +4,9 @@ const assert=require('node:assert/strict');
 const { mkdtempSync, rmSync, existsSync }=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const dir=mkdtempSync(path.join(os.tmpdir(),'motokare-test-'));
-process.env.DB_PATH=path.join(dir,'test.sqlite');
+process.env.PG_SCHEMA='mk_test_'+require('node:crypto').randomBytes(6).toString('hex');
 process.env.HOST='127.0.0.1';
-const {server}=require('../server/index');
+const {server,ready,pool}=require('../server');
 const dateShift=n=>{const d=new Date();d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
 let base;
 async function call(method,url,payload,cookie,header='web'){
@@ -18,7 +17,7 @@ async function call(method,url,payload,cookie,header='web'){
 test('full registration, CRUD, authorization, persistence and session flow',async t=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  base=`http://127.0.0.1:${server.address().port}`;
- t.after(async()=>{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});});
+ t.after(async()=>{await new Promise(resolve=>server.close(resolve));await pool.query(`DROP SCHEMA IF EXISTS "${process.env.PG_SCHEMA}" CASCADE`);await pool.end();});
  let r=await call('GET','/api/health');assert.equal(r.status,200);
  assert.equal((await call('GET','/api/bootstrap')).status,401);
  assert.equal((await call('GET','/api/auth/me')).status,401);
@@ -80,7 +79,7 @@ test('full registration, CRUD, authorization, persistence and session flow',asyn
  assert.equal((await call('GET','/api/bootstrap',undefined,shop)).status,401);
  const login=await call('POST','/api/auth/login',{email:'shop-new@example.com',password:'aNewSecurePassword123',role:'shop'});
  assert.equal(login.status,200);assert.equal((await call('GET','/api/bootstrap',undefined,login.cookie)).data.customers.length,1);
- assert.ok(existsSync(process.env.DB_PATH));
+ assert.equal((await pool.query('SELECT COUNT(*)::int AS count FROM users')).rows[0].count,3);
  assert.equal((await call('DELETE',`/api/bikes/${bikeId}`,undefined,rider1)).status,200);
  assert.equal((await call('GET','/api/bootstrap',undefined,rider1)).data.services.length,0);
  assert.equal((await call('DELETE',`/api/customers/${customerId}`,undefined,login.cookie)).status,200);
@@ -89,6 +88,6 @@ test('full registration, CRUD, authorization, persistence and session flow',asyn
  const web=await fetch(base+'/');assert.equal(web.status,200);assert.match(await web.text(),/MotoKare/);
  assert.equal((await fetch(base+'/app.js')).status,200);
  assert.equal((await fetch(base+'/styles.css')).status,200);
- assert.equal((await fetch(base+'/server/index.js')).status,404);
- assert.equal((await fetch(base+'/data/test.sqlite')).status,404);
+ assert.equal((await fetch(base+'/backend/server.js')).status,404);
+ assert.equal((await fetch(base+'/backend/schema.sql')).status,404);
 });

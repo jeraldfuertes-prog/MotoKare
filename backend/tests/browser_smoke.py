@@ -3,10 +3,10 @@ import os, subprocess, tempfile, time, urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-base=Path(__file__).resolve().parents[1]
+base=Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix='motokare-ui-') as temp:
-    env={**os.environ,'PORT':'30471','HOST':'127.0.0.1','DB_PATH':str(Path(temp)/'app.sqlite')}
-    proc=subprocess.Popen(['node','server/index.js'],cwd=base,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    env={**os.environ,'PORT':'30471','HOST':'127.0.0.1','PG_SCHEMA':'mk_smoke_'+__import__('secrets').token_hex(5)}
+    proc=subprocess.Popen(['node','--env-file-if-exists=.env','backend/server.js'],cwd=base,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     try:
         for _ in range(50):
             try:
@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='motokare-ui-') as temp:
             errors=[]
             page.on('pageerror', lambda e: errors.append(str(e)))
             page.goto('http://127.0.0.1:30471/',wait_until='domcontentloaded',timeout=15000)
-            page.screenshot(path=str(base/'tests/home_screenshot.png'),full_page=False)
+            page.screenshot(path=str(Path(temp)/'home_screenshot.png'),full_page=False)
             page.locator('a[href="#/register"]').first.click()
             page.locator('input[name="fullName"]').fill('Test Rider')
             page.locator('input[name="email"]').fill('rider-ui@example.com')
@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='motokare-ui-') as temp:
             page.reload(wait_until='domcontentloaded')
             page.wait_for_url('**/#/rider/dashboard',timeout=5000)
             page.get_by_text('Honda Click 125',exact=False).first.wait_for(timeout=5000)
-            page.screenshot(path=str(base/'tests/rider_screenshot.png'),full_page=False)
+            page.screenshot(path=str(Path(temp)/'rider_screenshot.png'),full_page=False)
             page.locator('[data-action="logout"]').click()
             page.wait_for_url('**/#/',timeout=5000)
             page.locator('a[href="#/register"]').first.click()
