@@ -7,21 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: motokare
-          POSTGRES_USER: motokare
-          POSTGRES_PASSWORD: motokare_ci_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U motokare -d motokare"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+    runs-on: ubuntu-24.04
     env:
       DATABASE_URL: postgresql://motokare:motokare_ci_password@127.0.0.1:5432/motokare
       HOST: 127.0.0.1
@@ -31,6 +17,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
+      - name: Install and start PostgreSQL directly (no containers)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          sudo pg_ctlcluster 16 main status >/dev/null 2>&1 || sudo pg_ctlcluster 16 main start
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE motokare LOGIN PASSWORD 'motokare_ci_password';"
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE motokare OWNER motokare;"
+          pg_isready -h 127.0.0.1 -p 5432
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Check JavaScript syntax

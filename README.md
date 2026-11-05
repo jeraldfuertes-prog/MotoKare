@@ -20,38 +20,65 @@ MotoKare/
 │       ├── api.test.js
 │       ├── frontend.test.js
 │       └── browser_smoke.py    # Optional Playwright smoke test
-├── docker-compose.yml     # Local PostgreSQL 16
 ├── .env.example
 ├── .gitignore
 ├── package.json
 └── README.md
 ```
 
-## Quick start (VS Code, Windows/macOS/Linux)
+## Quick start (Windows, locally installed PostgreSQL)
 
-**You need:** Node.js 22.13 or newer, npm, and PostgreSQL 16 or newer (or Docker Desktop with Compose).
+**Prerequisites:** Node.js 22.13 or newer, npm, and an already installed **PostgreSQL 16+** server. Docker, WSL, and containers are **not required**.
 
-```bash
-# Clone the repository (skip if already cloned; use git pull instead)
-git clone https://github.com/jeraldfuertes-prog/MotoKare.git
-cd MotoKare
+1. In PowerShell, open the project folder and install dependencies:
 
-# Start the PostgreSQL container (requires Docker Desktop / Docker Engine)
-docker compose up -d db
+   ```powershell
+   cd C:\Users\Administrator\Desktop\MotoKare
+   git pull origin main
+   npm.cmd install
+   ```
 
-# Install Node.js dependencies
-npm install
-```
+   For a fresh machine, clone the repo first: `git clone https://github.com/jeraldfuertes-prog/MotoKare.git`.
 
-Create your own `.env` by copying `.env.example` (Windows PowerShell: `Copy-Item .env.example .env`; macOS/Linux: `cp .env.example .env`), then run:
+2. Verify your local PostgreSQL Windows service is running:
 
-```bash
-npm start
-```
+   ```powershell
+   Get-Service postgresql*
+   ```
 
-Open **http://127.0.0.1:3000**. PostgreSQL tables are created automatically at server startup. Register a new rider or shop account to use the system. The Node server serves files from `frontend/` as well as `/api/*`, so the browser and API share the same origin and session cookies work.
+   If it is stopped, start the service in Windows Services or from an elevated PowerShell session (service names depend on the installed PostgreSQL version).
 
-**No Docker?** Install PostgreSQL locally, create a database/user with suitable permissions, and update `DATABASE_URL` in `.env`. Do not publish `.env` or store real credentials in Git. Cloud-hosted PostgreSQL works with a provider-specific connection URL and TLS settings appropriate to that provider.
+3. Open **pgAdmin 4**, connect to your local server using the administrator (`postgres`) account, and open **Query Tool**. Run these statements **separately**, one at a time, with a strong password of your choosing:
+
+   ```sql
+   CREATE ROLE motokare LOGIN PASSWORD 'CHOOSE_A_STRONG_PASSWORD';
+   ```
+
+   ```sql
+   CREATE DATABASE motokare OWNER motokare;
+   ```
+
+   If you already have that role or database, reuse it rather than creating it again. The database role must own (or be permitted to create tables and test schemas in) the `motokare` database.
+
+4. Copy the environment template, then edit **`.env`** in VS Code:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+   Set `DATABASE_URL` to the username, password, port, and database you configured in PostgreSQL. **Replace the password placeholder**; it is deliberately not a working credential. URL-encode special characters in the password (for example, `@` becomes `%40`, `#` becomes `%23`). Never commit `.env` to Git.
+
+5. Start MotoKare:
+
+   ```powershell
+   npm.cmd start
+   ```
+
+   Open **http://127.0.0.1:3000**. On startup, the backend initializes its PostgreSQL tables. Register a rider or shop account to begin.
+
+The Node.js server serves the static `frontend/` files and `/api/*` from the same origin, so the frontend's session cookies work without a separate frontend server.
+
+For macOS/Linux, use the equivalent PostgreSQL service commands, `npm install`, `cp .env.example .env`, and `npm start`. A hosted PostgreSQL server can also be used with a compatible connection string and appropriate TLS configuration.
 
 ## Run checks and API tests
 
@@ -100,11 +127,11 @@ This copies users (including existing scrypt password hashes), motorcycles, main
 
 ## Security and deployment notes
 
-- `DATABASE_URL` is required; the local Docker credentials are for **development only**.
+- `DATABASE_URL` is required. Use a dedicated PostgreSQL role and store its credentials only in your untracked `.env` file.
 - Passwords are salted and hashed with `scrypt`; sessions are stored as hashes in PostgreSQL, with server-side expiration and revocation.
 - SQL statements use parameterized queries; create-bike and create-service operations use PostgreSQL transactions on the same pool client.
 - API endpoints restrict operations to the authenticated account, including independent rider/workshop workspaces.
-- Local PostgreSQL is bound to `127.0.0.1` in Docker Compose, not exposed publicly.
+- Configure local PostgreSQL to listen only on trusted network interfaces; use Windows firewall rules and PostgreSQL access controls to prevent unwanted external access.
 - For production: rotate all secrets, host behind HTTPS, set `COOKIE_SECURE=1`, use managed PostgreSQL or configured backups, set up monitoring and audit logging, and arrange independent security testing.
 - This release has in-app maintenance reminders based on manually recorded mileage/date, not motorcycle sensor diagnostics or external email/SMS delivery. Rider and shop accounts do not share records without a future consent-based linking system.
 
