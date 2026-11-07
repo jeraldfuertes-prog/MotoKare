@@ -23,7 +23,7 @@ function appSession(base,cookie,hash){
     FormData:globalThis.FormData,URL,Blob};
  vm.createContext(context);
  vm.runInContext(js,context,{filename:'app.js',timeout:1000});
- return {location,document,window:win,elements,listeners};
+ return {location,document,window:win,elements,listeners,context};
 }
 async function send(base,url,method='GET',payload,cookie){const r=await fetch(base+url,{method,headers:{...(cookie?{cookie}:{}),...(payload?{'content-type':'application/json'}:{}),'x-motokare-client':'web'},...(payload?{body:JSON.stringify(payload)}:{})});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};}
 const wait=async pred=>{for(let i=0;i<40;i++){if(pred())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out waiting for frontend render');};
@@ -36,6 +36,17 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  await wait(()=>riderPage.elements['#app'].innerHTML.includes('Kawasaki Model XYZ'));
  assert.match(riderPage.elements['#app'].innerHTML,/SECURE SESSION ACTIVE/);
  assert.match(riderPage.elements['#app'].innerHTML,/Rider Test/);
+ // Regression: Add Motorcycle must work even though the date-based form has no odometer field.
+ riderPage.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ riderPage.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'add-bike'},values:{model:'Wave 100',year:'2024',plate:''}})}});
+ await wait(()=>riderPage.elements['#app'].innerHTML.includes('Wave 100'));
+ const dateBikeState=await send(base,'/api/bootstrap','GET',undefined,rider.cookie);
+ assert.equal(dateBikeState.status,200);
+ assert.equal(dateBikeState.data.bikes.find(b=>b.model==='Wave 100')?.odometer,0);
+
  assert.match(riderPage.elements['#app'].innerHTML,/NEXT SERVICE DATE/);
  assert.match(riderPage.elements['#app'].innerHTML,/DAYS TO SERVICE/);
  assert.doesNotMatch(riderPage.elements['#app'].innerHTML,/CURRENT ODOMETER/);

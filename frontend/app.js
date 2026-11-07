@@ -193,7 +193,11 @@
     if(type==='password'){const ok=await persist('/me/password','PATCH',{currentPassword:v.currentPassword,newPassword:v.newPassword},'Password changed; other sessions signed out.',{close:false});if(ok)form.reset();return;}
     const bike=ensureBike();
     if(type==='add-bike'||type==='edit-bike'){
-      const payload={model:v.model,year:Number(v.year),plate:v.plate,...(!v.odometer?{}:{odometer:Number(v.odometer)})};
+      // Keep API compatibility: the date-based form hides mileage, but the legacy bike model still stores it.
+      // Preserve an existing reading on edits; use zero for newly created motorcycles.
+      const storedOdometer=state.bikes.find(b=>b.id===id)?.odometer??0;
+      const odometer=v.odometer===undefined||v.odometer===''?storedOdometer:Number(v.odometer);
+      const payload={model:v.model,year:Number(v.year),plate:v.plate,odometer};
       const success=await persist(type==='edit-bike'?'/bikes/'+encodeURIComponent(id):'/bikes',type==='edit-bike'?'PATCH':'POST',payload,type==='edit-bike'?'Motorcycle details updated.':'Motorcycle added to your garage.');
       if(success&&type==='add-bike'){state.selectedBike=state.bikes[0]?.id;render();}return;
     }
