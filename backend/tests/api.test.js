@@ -7,7 +7,8 @@ const path=require('node:path');
 process.env.PG_SCHEMA='mk_test_'+require('node:crypto').randomBytes(6).toString('hex');
 process.env.HOST='127.0.0.1';
 const {server,ready,pool}=require('../server');
-const dateShift=n=>{const d=new Date();d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+// Match the Philippine calendar used for maintenance deadlines in the API.
+const dateShift=n=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const a=Object.fromEntries(p.map(x=>[x.type,x.value]));const d=new Date(a.year+'-'+a.month+'-'+a.day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
 let base;
 async function call(method,url,payload,cookie,header='web'){
  const res=await fetch(base+url,{method,headers:{...(payload===undefined?{}:{'content-type':'application/json'}),...(header?{'x-motokare-client':header}:{}),...(cookie?{'cookie':cookie}:{})},...(payload===undefined?{}:{body:JSON.stringify(payload)})});
