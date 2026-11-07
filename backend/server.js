@@ -80,7 +80,7 @@ async function api(req,res,url){
   await transaction(async tx => {
    await tx('INSERT INTO bikes(id,user_id,model,year,plate,odometer,updated) VALUES(?,?,?,?,?,?,?)').run(id,user.id,model,year,plate,odometer,d);
    for (const [name,icon,interval,days] of catalog) {
-    await tx('INSERT INTO components(id,user_id,bike_id,name,icon,interval,last_km,next_km,due_date,interval_days,last_service_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(randomUUID(),user.id,id,name,icon,interval,odometer,odometer+interval,later(days,d),days,d);
+    await tx('INSERT INTO components(id,user_id,bike_id,name,icon,interval,last_km,next_km,due_date,interval_days,last_service_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(randomUUID(),user.id,id,name,icon,interval,odometer,odometer+interval,later(days,d),days,null);
    }
   });
   return send(res,201,{id});

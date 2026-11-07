@@ -36,6 +36,15 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  await wait(()=>riderPage.elements['#app'].innerHTML.includes('Kawasaki Model XYZ'));
  assert.match(riderPage.elements['#app'].innerHTML,/SECURE SESSION ACTIVE/);
  assert.match(riderPage.elements['#app'].innerHTML,/Rider Test/);
+ assert.match(riderPage.elements['#app'].innerHTML,/NEXT SERVICE DATE/);
+ assert.match(riderPage.elements['#app'].innerHTML,/DAYS TO SERVICE/);
+ assert.doesNotMatch(riderPage.elements['#app'].innerHTML,/CURRENT ODOMETER/);
+ riderPage.location.hash='#/rider/components';riderPage.listeners.hashchange();
+ assert.match(riderPage.elements['#app'].innerHTML,/Service Interval Monitor/);
+ assert.match(riderPage.elements['#app'].innerHTML,/day(s)? left|Due today|overdue/i);
+ riderPage.location.hash='#/rider/maintenance';riderPage.listeners.hashchange();
+ assert.match(riderPage.elements['#app'].innerHTML,/Days Remaining/);
+ assert.doesNotMatch(riderPage.elements['#app'].innerHTML,/Next Mileage/);
  riderPage.location.hash='#/shop/dashboard';riderPage.listeners.hashchange();
  assert.equal(riderPage.location.hash,'#/rider/dashboard');
  const shop=await send(base,'/api/auth/register','POST',{role:'shop',fullName:'Repair Owner',shopName:'MotoKare Partner Garage',email:'s@ui.test',password:'testPassword1234!'});assert.equal(shop.status,201);

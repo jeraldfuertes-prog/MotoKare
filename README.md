@@ -80,6 +80,17 @@ The Node.js server serves the static `frontend/` files and `/api/*` from the sam
 
 For macOS/Linux, use the equivalent PostgreSQL service commands, `npm install`, `cp .env.example .env`, and `npm start`. A hosted PostgreSQL server can also be used with a compatible connection string and appropriate TLS configuration.
 
+## Date-based maintenance monitoring (no mileage entry required)
+
+- On the **Rider Dashboard** and **Components → Service Interval Monitor**, MotoKare displays next service dates and days remaining instead of estimated kilometers.
+- Open **Components → Edit** to enter the **last service date** and a **service interval in days** for each component. Its next due date is recalculated automatically; riders can customize intervals based on their own motorcycle manuals.
+- When you **Record Maintenance**, choose the completed service date; a matching component's next due date becomes that service date plus its interval. Saving older historical records does not override a newer already-recorded service date.
+- Status uses the Philippine calendar date (`Asia/Manila`): **On Track** is more than 14 days away, **Service Soon** is 1–14 days away, **Due Today** is today, and **Overdue** is past the due date.
+- While the page is open, dates update after midnight through the browser's minute check or upon regaining focus; reminders are shown **inside the app**. There are no background push notifications, email, SMS, or motorcycle sensors.
+- Existing databases are upgraded **without deleting data**. Existing due dates stay unchanged, legacy odometer values are preserved, and unknown historical last-service dates remain blank until a rider enters them. New motorcycles start with estimated example due dates, not a fabricated completed-service history.
+
+**Important:** Time-based reminders are scheduling aids, not actual motorcycle-condition measurements. Manufacturer maintenance may also have mileage thresholds; always service sooner if required by usage, symptoms, or the service manual.
+
 ## Run checks and API tests
 
 ```bash
@@ -94,7 +105,7 @@ The Node test suite connects to **a real PostgreSQL server** via `DATABASE_URL`.
 ## Main features
 
 - **Accounts:** registration, login, logout, password change, profile editing; server-side sessions; rider/shop role boundaries.
-- **Rider:** motorcycle profiles, odometer updates, maintenance component intervals, due/overdue indicators, service history and expenses.
+- **Rider:** motorcycle profiles, **date-based maintenance intervals**, automatic days-remaining/due/overdue indicators, service history and expenses. Odometer entry is not required for routine use.
 - **Workshop:** customers, service jobs, service statuses, appointments, financial/workload reports.
 - **Persistence:** all records are stored in PostgreSQL; no browser-only fake authentication.
 - **Frontend:** the original MotoKare HUD visual design and route/navigation behavior are preserved.
@@ -133,6 +144,6 @@ This copies users (including existing scrypt password hashes), motorcycles, main
 - API endpoints restrict operations to the authenticated account, including independent rider/workshop workspaces.
 - Configure local PostgreSQL to listen only on trusted network interfaces; use Windows firewall rules and PostgreSQL access controls to prevent unwanted external access.
 - For production: rotate all secrets, host behind HTTPS, set `COOKIE_SECURE=1`, use managed PostgreSQL or configured backups, set up monitoring and audit logging, and arrange independent security testing.
-- This release has in-app maintenance reminders based on manually recorded mileage/date, not motorcycle sensor diagnostics or external email/SMS delivery. Rider and shop accounts do not share records without a future consent-based linking system.
+- This release has in-app maintenance reminders calculated from **calendar dates**, not motorcycle sensor diagnostics or external email/SMS delivery. Rider and shop accounts do not share records without a future consent-based linking system.
 
 **Development status:** Frontend and API source have been migrated to PostgreSQL. Real PostgreSQL integration tests require a PostgreSQL instance; don't assume production readiness from syntax tests alone.

@@ -39,7 +39,13 @@ test('full registration, CRUD, authorization, persistence and session flow',asyn
  let state=(await call('GET','/api/bootstrap',undefined,rider1)).data;
  assert.equal(state.bikes.length,1);assert.equal(state.components.length,6);
  assert.equal(state.bikes[0].odometer,1000);
+ assert.ok(state.components.every(c=>c.intervalDays>=1 && c.lastServiceDate===null),'New motorcycle defaults should not claim a completed service today');
+ assert.ok(state.components.every(c=>/^\d{4}-\d{2}-\d{2}$/.test(c.dueDate)));
  assert.equal((await call('GET','/api/bootstrap',undefined,rider2)).data.bikes.length,0);
+ // No odometer entry is required to create a motorcycle.
+ const zeroKm=await call('POST','/api/bikes',{model:'Date Based Bike',year:2025},rider2);
+ assert.equal(zeroKm.status,201,JSON.stringify(zeroKm.data));
+ assert.equal((await call('GET','/api/bootstrap',undefined,rider2)).data.bikes[0].odometer,0);
  assert.equal((await call('PATCH',`/api/bikes/${bikeId}/odometer`,{odometer:1400},rider2)).status,404);
  assert.equal((await call('PATCH',`/api/bikes/${bikeId}/odometer`,{odometer:900},rider1)).status,400);
  assert.equal((await call('PATCH',`/api/bikes/${bikeId}/odometer`,{odometer:1400},rider1)).status,200);
@@ -51,8 +57,26 @@ test('full registration, CRUD, authorization, persistence and session flow',asyn
  assert.equal(svc.status,201,JSON.stringify(svc.data));
  state=(await call('GET','/api/bootstrap',undefined,rider1)).data;
  assert.equal(state.services.length,1);assert.equal(state.components.find(x=>x.name==='Engine Oil').nextKm,4050);
+ assert.equal(state.components.find(x=>x.name==='Engine Oil').lastServiceDate,dateShift(-1));
+ assert.equal(state.components.find(x=>x.name==='Engine Oil').dueDate,dateShift(29));
  assert.equal(state.bikes[0].odometer,1550);
  assert.equal((await call('GET','/api/reports',undefined,rider1)).data.totalServiceCost,450.29);
+ // Edit a date-based interval, verify overdue reminders, then record service without mileage.
+ assert.equal((await call('PATCH',`/api/components/${component.id}`,{intervalDays:5,lastServiceDate:dateShift(2)},rider1)).status,400);
+ let intervalChange=await call('PATCH',`/api/components/${component.id}`,{intervalDays:5,lastServiceDate:dateShift(-10)},rider1);
+ assert.equal(intervalChange.status,200,JSON.stringify(intervalChange.data));
+ assert.equal(intervalChange.data.dueDate,dateShift(-5));
+ let alerts=(await call('GET','/api/notifications',undefined,rider1)).data.notifications;
+ assert.ok(alerts.some(n=>n.id===component.id&&n.type==='overdue'&&n.remainingDays===-5));
+ const beforeDateOnly=(await call('GET','/api/bootstrap',undefined,rider1)).data.bikes[0].odometer;
+ const dateOnly=await call('POST','/api/services',{bikeId,type:'Engine Oil',date:dateShift(-1),cost:0,shop:'Home Service',notes:'Date-only record'},rider1);
+ assert.equal(dateOnly.status,201,JSON.stringify(dateOnly.data));
+ state=(await call('GET','/api/bootstrap',undefined,rider1)).data;
+ assert.equal(state.bikes[0].odometer,beforeDateOnly,'Date-only service should not change odometer');
+ assert.equal(state.components.find(x=>x.id===component.id).dueDate,dateShift(4));
+ assert.equal(state.components.find(x=>x.id===component.id).lastServiceDate,dateShift(-1));
+ alerts=(await call('GET','/api/notifications',undefined,rider1)).data.notifications;
+ assert.ok(alerts.some(n=>n.id===component.id&&n.type==='soon'&&n.remainingDays===4));
  assert.equal((await call('POST','/api/services',{bikeId,type:'Hack',date:dateShift(0),mileage:2000,cost:0,shop:'X'},rider2)).status,404);
  let c=await call('POST','/api/customers',{name:'Carlos',contact:'09xxxxxxxxx',motorcycle:'Honda Beat',odometer:9000},shop);
  assert.equal(c.status,201,JSON.stringify(c.data));const customerId=c.data.id;
