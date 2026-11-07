@@ -101,12 +101,14 @@ async function api(req,res,url){
   await requireUser(req,'rider');await requireOwn('components',m[1],user);const b=await body(req);
    if(b.intervalDays===undefined && b.interval!==undefined){
     const interval=integer(b.interval,'Interval',1,1000000),last=integer(b.lastKm,'Last serviced mileage'),due=date(b.dueDate,'Due date');
+    await stmt('UPDATE components SET interval=?,last_km=?,next_km=?,due_date=? WHERE id=? AND user_id=?').run(interval,last,last+interval,due,m[1],user.id);
+    return send(res,200,{ok:true});
    }
    const intervalDays=integer(b.intervalDays,'Service interval (days)',1,3650),last=date(b.lastServiceDate,'Last service date');
    if(last>today())fail(400,'Last service date cannot be in the future');
    const due=later(intervalDays,last);
-   await stmt('UPDATE components SET interval_days=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?').run(intervalDays,last,due,m[1],user.id);return send(res,200,{ok:true,dueDate:due});
-  await stmt('UPDATE components SET interval=?,last_km=?,next_km=?,due_date=? WHERE id=? AND user_id=?').run(interval,last,last+interval,due,m[1],user.id);return send(res,200,{ok:true});
+   await stmt('UPDATE components SET interval_days=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?').run(intervalDays,last,due,m[1],user.id);
+   return send(res,200,{ok:true,dueDate:due});
  }
  if(path==='/api/services'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{services:await serviceRows(user.id)});}
  if(path==='/api/services'&&method==='POST'){
