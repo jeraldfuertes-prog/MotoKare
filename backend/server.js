@@ -14,8 +14,8 @@ const mimes={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=
 const base=path.resolve(__dirname,'../frontend');
 const catalog=[['Engine Oil','bolt',2000,30],['Brake Inspection','shield',4500,60],['Air Filter','filter',6000,90],['Chain & Sprocket','settings',2100,45],['Battery Check','bolt',7000,120],['Tire Inspection','target',4700,60]];
 const fail=(code,message)=>{const e=new Error(message);e.status=code;throw e;};
-const today=()=>new Date().toISOString().slice(0,10);
-const later=(days,date=new Date())=>{const d=new Date(date);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
+const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const a=Object.fromEntries(p.map(x=>[x.type,x.value]));return a.year+'-'+a.month+'-'+a.day;};
+const later=(days,dateString=today())=>{const d=new Date(dateString+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
 const text=(v,key,max=100,{min=1}={})=>{if(typeof v!=='string')fail(400,`${key} must be text`);const s=v.trim();if(s.length<min||s.length>max)fail(400,`${key} must contain ${min}–${max} characters`);return s;};
 const integer=(v,key,min=0,max=10000000)=>{const n=Number(v);if(v===''||v===null||v===undefined||!Number.isSafeInteger(n)||n<min||n>max)fail(400,`${key} must be a whole number between ${min} and ${max}`);return n;};
 const money=(v,key='cost')=>{const n=Number(v);if(v===''||v===null||v===undefined||!Number.isFinite(n)||n<0||n>100000000||Math.abs(Math.round(n*100)/100-n)>1e-8)fail(400,`${key} must be a valid nonnegative amount`);return n;};
@@ -76,11 +76,11 @@ async function api(req,res,url){
  }
  if(path==='/api/bikes'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{bikes:await bikeRows(user.id)});}
  if(path==='/api/bikes'&&method==='POST'){
-  await requireUser(req,'rider');const b=await body(req),id=randomUUID(),model=text(b.model,'Model',70),year=integer(b.year,'Year',1950,2100),plate=text(b.plate??'','Plate',25,{min:0}),odometer=integer(b.odometer,'Odometer'),d=today();
+  await requireUser(req,'rider');const b=await body(req),id=randomUUID(),model=text(b.model,'Model',70),year=integer(b.year,'Year',1950,2100),plate=text(b.plate??'','Plate',25,{min:0}),odometer=integer(b.odometer??0,'Odometer'),d=today();
   await transaction(async tx => {
    await tx('INSERT INTO bikes(id,user_id,model,year,plate,odometer,updated) VALUES(?,?,?,?,?,?,?)').run(id,user.id,model,year,plate,odometer,d);
    for (const [name,icon,interval,days] of catalog) {
-     await tx('INSERT INTO components(id,user_id,bike_id,name,icon,interval,last_km,next_km,due_date) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(),user.id,id,name,icon,interval,odometer,odometer+interval,later(days));
+    await tx('INSERT INTO components(id,user_id,bike_id,name,icon,interval,last_km,next_km,due_date,interval_days,last_service_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(randomUUID(),user.id,id,name,icon,interval,odometer,odometer+interval,later(days,d),days,d);
    }
   });
   return send(res,201,{id});
@@ -91,7 +91,7 @@ async function api(req,res,url){
    const km=integer(b.odometer,'Odometer'); const result=await stmt('UPDATE bikes SET odometer=?,updated=? WHERE id=? AND user_id=? AND odometer<=?').run(km,today(),m[1],user.id,km);if(!result.changes)fail(400,'Odometer cannot decrease');return send(res,200,{ok:true});
   }
   if(method==='PATCH'&&!m[2]){
-   const model=text(b.model,'Model',70),year=integer(b.year,'Year',1950,2100),plate=text(b.plate??'','Plate',25,{min:0}),km=integer(b.odometer,'Odometer');const result=await stmt('UPDATE bikes SET model=?,year=?,plate=?,odometer=?,updated=? WHERE id=? AND user_id=? AND odometer<=?').run(model,year,plate,km,today(),m[1],user.id,km);if(!result.changes)fail(400,'Odometer cannot decrease');return send(res,200,{ok:true});
+   const model=text(b.model,'Model',70),year=integer(b.year,'Year',1950,2100),plate=text(b.plate??'','Plate',25,{min:0}),km=b.odometer===undefined?(await stmt('SELECT odometer FROM bikes WHERE id=? AND user_id=?').get(m[1],user.id)).odometer:integer(b.odometer,'Odometer');const result=await stmt('UPDATE bikes SET model=?,year=?,plate=?,odometer=?,updated=? WHERE id=? AND user_id=? AND odometer<=?').run(model,year,plate,km,today(),m[1],user.id,km);if(!result.changes)fail(400,'Odometer cannot decrease');return send(res,200,{ok:true});
   }
   if(method==='DELETE'&&!m[2]){await stmt('DELETE FROM bikes WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}
  }
@@ -99,23 +99,34 @@ async function api(req,res,url){
  m=path.match(/^\/api\/components\/([^/]+)$/);
  if(m&&method==='PATCH'){
   await requireUser(req,'rider');await requireOwn('components',m[1],user);const b=await body(req);
-  const interval=integer(b.interval,'Interval',1,1000000),last=integer(b.lastKm,'Last serviced mileage'),due=date(b.dueDate,'Due date');
+   if(b.intervalDays===undefined && b.interval!==undefined){
+    const interval=integer(b.interval,'Interval',1,1000000),last=integer(b.lastKm,'Last serviced mileage'),due=date(b.dueDate,'Due date');
+   }
+   const intervalDays=integer(b.intervalDays,'Service interval (days)',1,3650),last=date(b.lastServiceDate,'Last service date');
+   if(last>today())fail(400,'Last service date cannot be in the future');
+   const due=later(intervalDays,last);
+   await stmt('UPDATE components SET interval_days=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?').run(intervalDays,last,due,m[1],user.id);return send(res,200,{ok:true,dueDate:due});
   await stmt('UPDATE components SET interval=?,last_km=?,next_km=?,due_date=? WHERE id=? AND user_id=?').run(interval,last,last+interval,due,m[1],user.id);return send(res,200,{ok:true});
  }
  if(path==='/api/services'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{services:await serviceRows(user.id)});}
  if(path==='/api/services'&&method==='POST'){
   await requireUser(req,'rider');const b=await body(req);await requireOwn('bikes',b.bikeId,user);
-  const type=text(b.type,'Service type',100),d=date(b.date),mileage=integer(b.mileage,'Mileage'),cost=money(b.cost),shop=text(b.shop,'Workshop',70),notes=text(b.notes||'','Notes',300,{min:0});
+   const type=text(b.type,'Service type',100),d=date(b.date),mileage=b.mileage===undefined?null:integer(b.mileage,'Mileage'),cost=money(b.cost),shop=text(b.shop,'Workshop',70),notes=text(b.notes||'','Notes',300,{min:0});
+   if(d>today())fail(400,'Completed service date cannot be in the future');
   const id=randomUUID();
   await transaction(async tx => {
    // Recheck the bike inside the transaction to keep its mileage and service in sync.
    const current = await tx('SELECT odometer FROM bikes WHERE id=? AND user_id=? FOR UPDATE').get(b.bikeId,user.id);
    if (!current) fail(404, 'Record not found');
-   if (mileage > current.odometer+100000) fail(400,'Service mileage exceeds expected range');
-   await tx('INSERT INTO services(id,user_id,bike_id,type,date,mileage,cost,shop,notes) VALUES(?,?,?,?,?,?,?,?,?)').run(id,user.id,b.bikeId,type,d,mileage,cost,shop,notes);
-   if(mileage>current.odometer)await tx('UPDATE bikes SET odometer=?,updated=? WHERE id=? AND user_id=?').run(mileage,today(),b.bikeId,user.id);
-   const component=await tx('SELECT id,interval FROM components WHERE user_id=? AND bike_id=? AND name=?').get(user.id,b.bikeId,type);
-   if(component){const due=new Date(`${d}T12:00:00Z`);due.setUTCMonth(due.getUTCMonth()+6);await tx('UPDATE components SET last_km=?,next_km=?,due_date=? WHERE id=? AND user_id=?').run(mileage,mileage+component.interval,due.toISOString().slice(0,10),component.id,user.id);}
+    const recordedMileage=mileage??current.odometer;
+    if(mileage!==null && mileage>current.odometer+100000)fail(400,'Service mileage exceeds expected range');
+    await tx('INSERT INTO services(id,user_id,bike_id,type,date,mileage,cost,shop,notes) VALUES(?,?,?,?,?,?,?,?,?)').run(id,user.id,b.bikeId,type,d,recordedMileage,cost,shop,notes);
+    if(mileage!==null&&mileage>current.odometer)await tx('UPDATE bikes SET odometer=?,updated=? WHERE id=? AND user_id=?').run(mileage,today(),b.bikeId,user.id);
+    const component=await tx('SELECT id,interval,interval_days,last_service_date FROM components WHERE user_id=? AND bike_id=? AND name=?').get(user.id,b.bikeId,type);
+    if(component&&(!component.last_service_date||d>=component.last_service_date)){
+      const due=later(component.interval_days,d);
+      await tx('UPDATE components SET last_km=?,next_km=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?').run(recordedMileage,recordedMileage+component.interval,d,due,component.id,user.id);
+    }
   });
   return send(res,201,{id});
  }
@@ -167,7 +178,7 @@ async function api(req,res,url){
  }
  if(path==='/api/notifications'&&method==='GET'){
   if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');return send(res,200,{notifications:pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date}))});}
-  const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id)){const days=Math.ceil((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000),rem=c.nextKm-b.odometer;if(rem<=300||days<=14)items.push({id:c.id,bikeId:b.id,type:rem<=0||days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingKm:rem,dueDate:c.dueDate});}
+  const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id)){const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);if(days<=14)items.push({id:c.id,bikeId:b.id,type:days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingDays:days,dueDate:c.dueDate});}
   return send(res,200,{notifications:items});
  }
  if(path==='/api/reports'&&method==='GET'){

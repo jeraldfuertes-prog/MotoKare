@@ -87,3 +87,15 @@ CREATE TABLE IF NOT EXISTS appointments (
   row_seq BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE
 );
 CREATE INDEX IF NOT EXISTS appointments_user ON appointments(user_id);
+-- Safe additive upgrade: preserve historical data and existing due dates.
+ALTER TABLE components ADD COLUMN IF NOT EXISTS interval_days INTEGER;
+ALTER TABLE components ADD COLUMN IF NOT EXISTS last_service_date TEXT;
+UPDATE components SET interval_days = CASE name
+  WHEN 'Engine Oil' THEN 30
+  WHEN 'Brake Inspection' THEN 60
+  WHEN 'Air Filter' THEN 90
+  WHEN 'Chain & Sprocket' THEN 45
+  WHEN 'Battery Check' THEN 120
+  WHEN 'Tire Inspection' THEN 60
+  ELSE 90 END
+WHERE interval_days IS NULL;

@@ -54,7 +54,7 @@ async function initDatabase() {
 const ready = initDatabase();
 const getUser = id => stmt('SELECT id,email,name,role,shop_name AS "shopName" FROM users WHERE id=?').get(id);
 const bikeRows = id => stmt('SELECT id,model,year,plate,odometer,updated FROM bikes WHERE user_id=? ORDER BY updated DESC,row_seq DESC').all(id);
-const componentRows = id => stmt('SELECT id,bike_id AS "bikeId",name,icon,interval,last_km AS "lastKm",next_km AS "nextKm",due_date AS "dueDate" FROM components WHERE user_id=? ORDER BY row_seq').all(id);
+const componentRows = id => stmt('SELECT id,bike_id AS "bikeId",name,icon,interval,last_km AS "lastKm",next_km AS "nextKm",due_date AS "dueDate",interval_days AS "intervalDays",last_service_date AS "lastServiceDate" FROM components WHERE user_id=? ORDER BY row_seq').all(id);
 const serviceRows = id => stmt('SELECT id,bike_id AS "bikeId",type,date,mileage,cost,shop,notes FROM services WHERE user_id=? ORDER BY date DESC,row_seq DESC').all(id);
 const customerRows = id => stmt('SELECT id,name,contact,motorcycle,odometer,last_visit AS "lastVisit" FROM customers WHERE user_id=? ORDER BY row_seq DESC').all(id);
 const jobRows = id => stmt('SELECT id,customer_id AS "customerId",service,date,status,cost FROM jobs WHERE user_id=? ORDER BY date DESC,row_seq DESC').all(id);
