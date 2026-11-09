@@ -146,7 +146,7 @@
   const button=(action,title,ic='plus',primary=true)=>`<button type="button" class="button ${primary?'primary':''} small" data-action="${action}">${icon(ic)} ${title}</button>`;
   function metric(label,value,unit,ic){return `<div class="panel metric"><div style="display:flex;align-items:center;justify-content:space-between"><div class="label">${label}</div><span class="metric-icon">${icon(ic)}</span></div><div class="readout">${value} ${unit?`<small>${unit}</small>`:''}</div></div>`;}
   function componentRows(bike,compact=true){
-    const comps=activeComps(bike.id);
+    const comps=[...activeComps(bike.id)].sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
     if(!comps.length)return '<div class="empty-state"><h3>No active maintenance components</h3><p>Add a catalog or custom component to start tracking this motorcycle.</p>'+button('add-component','ADD COMPONENT')+'</div>';
     return '<div class="component-list">'+comps.slice(0,compact?4:comps.length).map(c=>{
       const h=health(c);
@@ -267,7 +267,9 @@
       if(type==='edit-component'&&(!record||record.archived))return toast('Restore this component before editing it.');
       const isEdit=Boolean(record),mode=record?.lastServiceDate?'last':'next';
       title=isEdit?'Edit Component':'Add Component';subtitle=isEdit?'Update component settings and maintenance reminders.':'Choose a catalog item or create a custom maintenance component.';
-      const options=(state.componentCatalog||[]).map(x=>[x.name,x.name+' · suggested '+x.suggestedDays+' days']);
+      const taken=new Set(activeComps(b.id).map(c=>c.name.toLowerCase()));
+      const available=(state.componentCatalog||[]).filter(x=>!taken.has(x.name.toLowerCase()));
+      const options=available.map(x=>[x.name,x.name+' · suggested '+x.suggestedDays+' days']);
       if(!isEdit){
         fields='<div class="component-source-tabs"><label class="component-choice"><input type="radio" name="source" value="catalog" checked> FROM CATALOG</label>'+
           '<label class="component-choice"><input type="radio" name="source" value="custom"> CUSTOM COMPONENT</label></div>'+
@@ -277,7 +279,7 @@
         fields=record.source==='custom'?field('name','Custom component name','text',record.name,'required maxlength="70" minlength="2"'):
           '<div class="field"><label>Component</label><strong>'+esc(record.name)+'</strong><small class="text-muted">Catalog or default component names are fixed.</small></div>';
       }
-      fields+='<div class="form-grid">'+field('intervalDays','Service interval (days)','number',record?.intervalDays||state.componentCatalog[0]?.suggestedDays||90,'min="1" max="3650" required')+
+      fields+='<div class="form-grid">'+field('intervalDays','Service interval (days)','number',record?.intervalDays||available[0]?.suggestedDays||90,'min="1" max="3650" required')+
         selectField('dateMode','Schedule based on',[['next','Next due date (last service unknown)'],['last','Known last service date']],mode)+'</div>'+
         '<div data-component-date="last" class="'+(mode==='last'?'':'hidden')+'">'+field('lastServiceDate','Last service date','date',record?.lastServiceDate||today(),(mode==='last'?'required ':'disabled ')+`max="${today()}"`)+'</div>'+
         '<div data-component-date="next" class="'+(mode==='next'?'':'hidden')+'">'+field('dueDate','Next planned service date','date',record?.dueDate||dateShift(90),(mode==='next'?'required':'disabled'))+'</div>'+

@@ -307,7 +307,7 @@ async function api(req,res,url){
  }
  if(path==='/api/notifications'&&method==='GET'){
   if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');const requests=(await connectionRows(user)).filter(x=>x.status==='pending');return send(res,200,{notifications:[...pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date})),...requests.map(x=>({id:x.id,type:'connection',message:`${x.riderName} requested to connect with your workshop`}))]});}
-  const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id)){const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);if(days<=14)items.push({id:c.id,bikeId:b.id,type:days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingDays:days,dueDate:c.dueDate});}
+  const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id&&!c.archived)){const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);if(days<=14)items.push({id:c.id,bikeId:b.id,type:days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingDays:days,dueDate:c.dueDate});}
   return send(res,200,{notifications:items});
  }
  if(path==='/api/reports'&&method==='GET'){
