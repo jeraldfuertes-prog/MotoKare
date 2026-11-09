@@ -56,6 +56,47 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  riderPage.location.hash='#/rider/maintenance';riderPage.listeners.hashchange();
  assert.match(riderPage.elements['#app'].innerHTML,/Days Remaining/);
  assert.doesNotMatch(riderPage.elements['#app'].innerHTML,/Next Mileage/);
+
+ // Components upgrade: catalog/custom dialog HTML and real rider CRUD from UI.
+ riderPage.location.hash='#/rider/components';riderPage.listeners.hashchange();
+ assert.match(riderPage.elements['#app'].innerHTML,/ADD COMPONENT/);
+ assert.match(riderPage.elements['#app'].innerHTML,/Archived Components/);
+ riderPage.listeners.click({target:{closest:()=>({dataset:{action:'add-component'}})}});
+ assert.match(riderPage.elements['#modal-root'].innerHTML,/FROM CATALOG/);
+ assert.match(riderPage.elements['#modal-root'].innerHTML,/CUSTOM COMPONENT/);
+ assert.match(riderPage.elements['#modal-root'].innerHTML,/Next planned service date/);
+ const dueDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+ riderPage.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'add-component'},values:{
+  source:'custom',name:'UI Custom Component',intervalDays:'30',dateMode:'next',dueDate,notes:'Check rider gear'
+ }})}});
+ await wait(()=>riderPage.elements['#app'].innerHTML.includes('UI Custom Component'));
+ assert.match(riderPage.elements['#app'].innerHTML,/ARCHIVE/);
+ assert.match(riderPage.elements['#app'].innerHTML,/DELETE/);
+ let componentState=(await send(base,'/api/bootstrap','GET',undefined,rider.cookie)).data;
+ const custom=componentState.components.find(c=>c.name==='UI Custom Component');
+ assert.ok(custom);assert.equal(custom.source,'custom');assert.equal(custom.lastServiceDate,null);
+ assert.equal(custom.dueDate,dueDate);
+ const serviceDate=new Date(Date.now()-5*86400000).toISOString().slice(0,10);
+ riderPage.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'log-service'},values:{
+  componentId:custom.id,date:serviceDate,cost:'35',shop:'Garage UI Test',notes:'Inspected'
+ }})}});
+ await wait(()=>riderPage.elements['#app'].innerHTML.includes('UI Custom Component'));
+ componentState=(await send(base,'/api/bootstrap','GET',undefined,rider.cookie)).data;
+ assert.ok(componentState.services.some(x=>x.componentId===custom.id&&x.type==='UI Custom Component'));
+ assert.equal(componentState.components.find(c=>c.id===custom.id).lastServiceDate,serviceDate);
+ // Rider may archive and restore with explicit confirmation.
+ riderPage.context.confirm=()=>true;
+ riderPage.listeners.click({target:{closest:()=>({dataset:{action:'archive-component',id:custom.id}})}});
+ await wait(()=>riderPage.elements['#app'].innerHTML.includes('Archived Components (1)'));
+ assert.equal((await send(base,'/api/bootstrap','GET',undefined,rider.cookie)).data.components.find(c=>c.id===custom.id).archived,true);
+ riderPage.listeners.click({target:{closest:()=>({dataset:{action:'restore-component',id:custom.id}})}});
+ await wait(()=>riderPage.elements['#app'].innerHTML.includes('Archived Components (0)'));
+ assert.equal((await send(base,'/api/bootstrap','GET',undefined,rider.cookie)).data.components.find(c=>c.id===custom.id).archived,false);
+ riderPage.listeners.click({target:{closest:()=>({dataset:{action:'delete-component',id:custom.id}})}});
+ await wait(()=>!riderPage.elements['#app'].innerHTML.includes('UI Custom Component'));
+ componentState=(await send(base,'/api/bootstrap','GET',undefined,rider.cookie)).data;
+ assert.ok(!componentState.components.some(c=>c.id===custom.id));
+ assert.ok(componentState.services.some(x=>x.type==='UI Custom Component'&&x.componentId===null));
  riderPage.location.hash='#/shop/dashboard';riderPage.listeners.hashchange();
  assert.equal(riderPage.location.hash,'#/rider/dashboard');
  const shop=await send(base,'/api/auth/register','POST',{role:'shop',fullName:'Repair Owner',shopName:'MotoKare Partner Garage',email:'s@ui.test',password:'testPassword1234!'});assert.equal(shop.status,201);
