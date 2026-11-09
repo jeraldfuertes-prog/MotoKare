@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, randomBytes, scrypt: scryptCallback, timingSafeEqual, createHash } = require('node:crypto');
 const { promisify } = require('node:util');
-const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows } = require('./db');
+const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, connectionRows } = require('./db');
 const scrypt=promisify(scryptCallback);
 const PORT=Number(process.env.PORT||3000);
 const HOST=process.env.HOST||'127.0.0.1';
@@ -73,6 +73,36 @@ async function api(req,res,url){
  if(path==='/api/me/password'&&method==='PATCH'){
   const b=await body(req),row=await stmt('SELECT password_hash FROM users WHERE id=?').get(user.id);if(!await passwordMatches(b.currentPassword||'',row.password_hash))fail(401,'Current password is incorrect');const hash=await hashPassword(pwd(b.newPassword));
   await stmt('UPDATE users SET password_hash=? WHERE id=?').run(hash,user.id);const s=await getSession(req);await stmt('DELETE FROM sessions WHERE user_id=? AND token_hash!=?').run(user.id,s.tokenHash);return send(res,200,{ok:true});
+ }
+ // Phase 4.1: explicit opt-in account connection flow; no private maintenance data is exposed.
+ if(path==='/api/shops'&&method==='GET'){
+  await requireUser(req,'rider');return send(res,200,{shops:await shopRows()});
+ }
+ if(path==='/api/connections'&&method==='GET')return send(res,200,{connections:await connectionRows(user)});
+ if(path==='/api/connections'&&method==='POST'){
+  await requireUser(req,'rider');const b=await body(req),shopId=text(b.shopId,'Workshop ID',64);
+  const shop=await stmt('SELECT id FROM users WHERE id=? AND role=?').get(shopId,'shop');
+  if(!shop)fail(404,'Workshop not found');
+  const id=randomUUID();
+  try{await stmt('INSERT INTO account_connections(id,rider_id,shop_id,status) VALUES(?,?,?,?)').run(id,user.id,shop.id,'pending');}
+  catch(err){if(err.code==='23505')fail(409,'A connection request to this workshop already exists');throw err;}
+  return send(res,201,{id,status:'pending'});
+ }
+ const link=path.match(/^\/api\/connections\/([0-9a-f-]+)$/);
+ if(link&&method==='PATCH'){
+  await requireUser(req,'shop');const b=await body(req),decision=status(b.status,['accepted','declined']);
+  const existing=await stmt('SELECT id,status FROM account_connections WHERE id=? AND shop_id=?').get(link[1],user.id);
+  if(!existing)fail(404,'Connection request not found');
+  if(existing.status!=='pending')fail(409,'Only pending requests can be reviewed');
+  const updated=await stmt('UPDATE account_connections SET status=?,updated_at=NOW() WHERE id=? AND shop_id=? AND status=? RETURNING id').get(decision,link[1],user.id,'pending');
+  if(!updated)fail(409,'This connection request was already reviewed');
+  return send(res,200,{ok:true,status:decision});
+ }
+ if(link&&method==='DELETE'){
+  const ownership=user.role==='rider'?'rider_id':'shop_id';
+  const deleted=await stmt('DELETE FROM account_connections WHERE id=? AND '+ownership+'=? RETURNING id').get(link[1],user.id);
+  if(!deleted)fail(404,'Connection not found');
+  return send(res,200,{ok:true});
  }
  if(path==='/api/bikes'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{bikes:await bikeRows(user.id)});}
  if(path==='/api/bikes'&&method==='POST'){
@@ -179,7 +209,7 @@ async function api(req,res,url){
   if(method==='DELETE'){await stmt('DELETE FROM appointments WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}
  }
  if(path==='/api/notifications'&&method==='GET'){
-  if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');return send(res,200,{notifications:pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date}))});}
+  if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');const requests=(await connectionRows(user)).filter(x=>x.status==='pending');return send(res,200,{notifications:[...pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date})),...requests.map(x=>({id:x.id,type:'connection',message:`${x.riderName} requested to connect with your workshop`}))]});}
   const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id)){const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);if(days<=14)items.push({id:c.id,bikeId:b.id,type:days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingDays:days,dueDate:c.dueDate});}
   return send(res,200,{notifications:items});
  }

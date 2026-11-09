@@ -99,3 +99,17 @@ UPDATE components SET interval_days = CASE name
   WHEN 'Tire Inspection' THEN 60
   ELSE 90 END
 WHERE interval_days IS NULL;
+
+-- Phase 4.1: opt-in rider/workshop connections. No service records are shared.
+CREATE TABLE IF NOT EXISTS account_connections (
+  id TEXT PRIMARY KEY,
+  rider_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shop_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(rider_id,shop_id),
+  CHECK (rider_id <> shop_id)
+);
+CREATE INDEX IF NOT EXISTS connections_rider ON account_connections(rider_id,status);
+CREATE INDEX IF NOT EXISTS connections_shop ON account_connections(shop_id,status);
