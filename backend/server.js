@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, randomBytes, scrypt: scryptCallback, timingSafeEqual, createHash } = require('node:crypto');
 const { promisify } = require('node:util');
-const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, connectionRows } = require('./db');
+const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows } = require('./db');
 const scrypt=promisify(scryptCallback);
 const PORT=Number(process.env.PORT||3000);
 const HOST=process.env.HOST||'127.0.0.1';
@@ -13,6 +13,7 @@ const files={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/st
 const mimes={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 const base=path.resolve(__dirname,'../frontend');
 const catalog=[['Engine Oil','bolt',2000,30],['Brake Inspection','shield',4500,60],['Air Filter','filter',6000,90],['Chain & Sprocket','settings',2100,45],['Battery Check','bolt',7000,120],['Tire Inspection','target',4700,60]];
+const SHOP_SERVICES=['Oil Change','Brake Service','Tire Service','Chain & Sprocket','Battery Service','Air Filter','Engine Repair','General Inspection','Other'];
 const fail=(code,message)=>{const e=new Error(message);e.status=code;throw e;};
 const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const a=Object.fromEntries(p.map(x=>[x.type,x.value]));return a.year+'-'+a.month+'-'+a.day;};
 const later=(days,dateString=today())=>{const d=new Date(dateString+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
@@ -76,7 +77,18 @@ async function api(req,res,url){
  }
  // Phase 4.1: explicit opt-in account connection flow; no private maintenance data is exposed.
  if(path==='/api/shops'&&method==='GET'){
-  await requireUser(req,'rider');return send(res,200,{shops:await shopRows()});
+  await requireUser(req,'rider');
+  const query=text(url.searchParams.get('q')||'','Search',80,{min:0}),city=text(url.searchParams.get('city')||'','City',80,{min:0});
+  const service=url.searchParams.get('service')||'';
+  if(service && !SHOP_SERVICES.includes(service))fail(400,'Invalid workshop service filter');
+  return send(res,200,{shops:await shopRows({query,city,service})});
+ }
+ if(path==='/api/shops/profile'&&method==='PATCH'){
+  await requireUser(req,'shop');const b=await body(req);
+  const city=text(b.city??'','City',80,{min:0}),address=text(b.address??'','Workshop address',160,{min:0}),description=text(b.description??'','Workshop description',500,{min:0});
+  if(!Array.isArray(b.services)||b.services.length>SHOP_SERVICES.length||b.services.some(s=>!SHOP_SERVICES.includes(s))||new Set(b.services).size!==b.services.length)fail(400,'Choose valid, unique workshop services');
+  await stmt('UPDATE users SET shop_city=?,shop_address=?,shop_description=?,services_offered=? WHERE id=? AND role=?').run(city,address,description,b.services,user.id,'shop');
+  return send(res,200,{ok:true,shopProfile:await shopProfile(user.id)});
  }
  if(path==='/api/connections'&&method==='GET')return send(res,200,{connections:await connectionRows(user)});
  if(path==='/api/connections'&&method==='POST'){

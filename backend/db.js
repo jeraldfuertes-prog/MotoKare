@@ -59,12 +59,18 @@ const serviceRows = id => stmt('SELECT id,bike_id AS "bikeId",type,date,mileage,
 const customerRows = id => stmt('SELECT id,name,contact,motorcycle,odometer,last_visit AS "lastVisit" FROM customers WHERE user_id=? ORDER BY row_seq DESC').all(id);
 const jobRows = id => stmt('SELECT id,customer_id AS "customerId",service,date,status,cost FROM jobs WHERE user_id=? ORDER BY date DESC,row_seq DESC').all(id);
 const appointmentRows = id => stmt('SELECT id,customer_id AS "customerId",service,date,time,status FROM appointments WHERE user_id=? ORDER BY date,time').all(id);
-const shopRows = () => stmt('SELECT id,shop_name AS "shopName" FROM users WHERE role=? ORDER BY shop_name,id').all('shop');
+const shopRows = ({query='',city='',service=''}={}) => stmt(`SELECT id,shop_name AS "shopName",shop_city AS city,shop_address AS address,shop_description AS description,services_offered AS services FROM users
+ WHERE role=?
+ AND (?='' OR shop_name ILIKE '%'||?||'%' OR shop_city ILIKE '%'||?||'%' OR shop_description ILIKE '%'||?||'%' OR shop_address ILIKE '%'||?||'%')
+ AND (?='' OR shop_city ILIKE '%'||?||'%')
+ AND (?='' OR ?=ANY(services_offered))
+ ORDER BY CASE WHEN shop_city='' THEN 1 ELSE 0 END,shop_name,id LIMIT 100`).all('shop',query,query,query,query,query,city,city,service,service);
+const shopProfile = id => stmt('SELECT shop_city AS city,shop_address AS address,shop_description AS description,services_offered AS services FROM users WHERE id=? AND role=?').get(id,'shop');
 // Only account names and status are exposed. No email, bikes, services or customer records.
 const connectionRows = user => stmt('SELECT c.id,c.rider_id AS "riderId",c.shop_id AS "shopId",c.status,c.created_at AS "createdAt",s.shop_name AS "shopName",r.name AS "riderName" FROM account_connections c JOIN users s ON s.id=c.shop_id AND s.role=? JOIN users r ON r.id=c.rider_id AND r.role=? WHERE '+(user.role==='rider'?'c.rider_id=?':'c.shop_id=?')+' ORDER BY c.created_at DESC,c.id DESC').all('shop','rider',user.id);
 async function bootstrap(user) {
   const rider = user.role === 'rider';
-  const [bikes, components, services, customers, jobs, appointments, shops, connections] = await Promise.all([
+  const [bikes, components, services, customers, jobs, appointments, shops, connections, profile] = await Promise.all([
     rider ? bikeRows(user.id) : [],
     rider ? componentRows(user.id) : [],
     rider ? serviceRows(user.id) : [],
@@ -73,12 +79,13 @@ async function bootstrap(user) {
     !rider ? appointmentRows(user.id) : [],
     rider ? shopRows() : [],
     connectionRows(user),
+    rider ? null : shopProfile(user.id),
   ]);
   return {
     version: 4, role: user.role, selectedBike: null,
     session: { name: user.name, email: user.email, mode: user.role },
-    bikes, components, services, customers, jobs, appointments, shops, connections,
+    bikes, components, services, customers, jobs, appointments, shops, connections, shopProfile:profile,
     settings: { shopName: user.shopName || '', notifications: true, distance: 'km' },
   };
 }
-module.exports = { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, connectionRows };
+module.exports = { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows };

@@ -113,3 +113,9 @@ CREATE TABLE IF NOT EXISTS account_connections (
 );
 CREATE INDEX IF NOT EXISTS connections_rider ON account_connections(rider_id,status);
 CREATE INDEX IF NOT EXISTS connections_shop ON account_connections(shop_id,status);
+
+-- Phase 4.2: optional public workshop discovery profile (not verified by MotoKare).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_city TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_address TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_description TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS services_offered TEXT[] NOT NULL DEFAULT '{}';
