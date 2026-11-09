@@ -173,7 +173,7 @@
         '<form data-form="search-shops" class="shop-search-form"><div class="field"><label for="shop-search-term">Shop or keyword</label><input id="shop-search-term" name="query" maxlength="80" placeholder="e.g. Davao, repair" value="'+esc(shopFilters.query)+'"></div>'+
         '<div class="field"><label for="shop-search-city">City or municipality</label><input id="shop-search-city" name="city" maxlength="80" placeholder="e.g. Davao City" value="'+esc(shopFilters.city)+'"></div>'+
         '<div class="field"><label for="shop-search-service">Service offered</label><select id="shop-search-service" name="service">'+serviceOptions+'</select></div>'+
-        '<div class="shop-search-actions"><button class="button primary small" type="submit">'+icon('search')+' SEARCH</button><button class="button small ghost" data-action="reset-shop-search" type="button">CLEAR</button></div></form></section>'+
+        '<div class="shop-search-actions"><button class="button primary small" type="submit">'+icon('filter')+' SEARCH</button><button class="button small ghost" data-action="reset-shop-search" type="button">CLEAR</button></div></form></section>'+
         '<div class="shop-result-label"><div class="label">WORKSHOP DIRECTORY // '+shops.length+' RESULT'+(shops.length===1?'':'S')+'</div><small>Up to 100 matches; no GPS tracking or verified business ratings.</small></div>'+
         '<div class="connection-grid shop-results">'+shops.map(shop=>{
           const link=byShop.get(shop.id),st=link?.status||'not connected';
@@ -184,7 +184,7 @@
           const location=[shop.city,shop.address].filter(Boolean).map(esc).join(' · ');
           const services=(shop.services||[]).map(s=>'<span class="shop-service-tag">'+esc(s)+'</span>').join('');
           return '<article class="panel connection-card shop-discovery-card"><div class="label">REGISTERED WORKSHOP // SELF-LISTED</div><h2>'+esc(shop.shopName)+'</h2>'+
-            (location?'<p class="shop-location">'+icon('mapPin')+' '+location+'</p>':'<p class="text-muted">Location not provided</p>')+
+            (location?'<p class="shop-location">'+icon('location')+' '+location+'</p>':'<p class="text-muted">Location not provided</p>')+
             (shop.description?'<p class="shop-description">'+esc(shop.description)+'</p>':'')+
             '<div class="shop-services">'+(services||'<span class="text-muted">Service categories not provided</span>')+'</div>'+
             '<div class="connection-meta"><span class="pill '+(st==='accepted'?'good':st==='pending'?'warn':'')+'">'+esc(st.toUpperCase())+'</span></div><div class="quick-actions">'+act+'</div></article>';
