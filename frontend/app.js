@@ -74,7 +74,7 @@
     {name:'Tire Inspection',icon:'target',interval:4700,last:10000,days:65}
   ];
   let state = {version:4, session:null, role:'rider', selectedBike:null,
-    bikes:[], components:[], services:[], customers:[], jobs:[], appointments:[], shops:[], connections:[], shopProfile:null,
+    bikes:[], components:[], componentCatalog:[], services:[], customers:[], jobs:[], appointments:[], shops:[], connections:[], shopProfile:null,
     settings:{shopName:'',notifications:true,distance:'km'}};
   let loaded = false;
   async function api(endpoint, method='GET', data){
@@ -89,7 +89,8 @@
     let selected=state.selectedBike;
     if(!selected){try{selected=localStorage.getItem(SELECTION_KEY);}catch{}}
     const incoming=await api('/bootstrap');
-    state={...incoming,selectedBike:incoming.bikes.some(b=>b.id===selected)?selected:(incoming.bikes[0]?.id||null)};
+    const componentCatalog=incoming.role==='rider'?(await api('/component-catalog')).catalog:[];
+    state={...incoming,componentCatalog,selectedBike:incoming.bikes.some(b=>b.id===selected)?selected:(incoming.bikes[0]?.id||null)};
     if(incoming.role==='rider'&&shopResults!==null)shopResults=(await api(shopSearchUrl())).shops;
     if(incoming.role!=='rider'){shopResults=null;shopFilters={query:'',city:'',service:''};}
     render();
@@ -111,7 +112,8 @@
   const parseAppRoute = path => {const a=path.split('/').filter(Boolean);return {role:a[0]==='shop'?'shop':'rider',page:a[1]||'dashboard'};};
   function navigate(path){location.hash='#'+path; if(routeNow()===path) render();}
   function ensureBike(){let bike=state.bikes.find(x=>x.id===state.selectedBike);if(!bike){bike=state.bikes[0];state.selectedBike=bike?.id??null;}return bike;}
-  const activeComps = id => state.components.filter(c=>c.bikeId===id);
+  const activeComps = id => state.components.filter(c=>c.bikeId===id&&!c.archived);
+  const archivedComps = id => state.components.filter(c=>c.bikeId===id&&c.archived);
   function health(c){
     const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);
     const overdue=days<0,soon=days<=14;
@@ -143,13 +145,44 @@
   const head=(tag,title,desc,buttons='')=>`<header class="page-head"><div><div class="label">${tag}</div><h1>${title}</h1><p>${desc}</p></div>${buttons?`<div class="page-actions">${buttons}</div>`:''}</header>`;
   const button=(action,title,ic='plus',primary=true)=>`<button type="button" class="button ${primary?'primary':''} small" data-action="${action}">${icon(ic)} ${title}</button>`;
   function metric(label,value,unit,ic){return `<div class="panel metric"><div style="display:flex;align-items:center;justify-content:space-between"><div class="label">${label}</div><span class="metric-icon">${icon(ic)}</span></div><div class="readout">${value} ${unit?`<small>${unit}</small>`:''}</div></div>`;}
-  function componentRows(bike,compact=true){const comps=activeComps(bike.id);return `<div class="component-list">${comps.slice(0,compact?4:comps.length).map(c=>{const h=health(c);return `<div class="component-row"><div class="comp-icon">${icon(c.icon)}</div><div><div class="comp-row-title"><strong>${esc(c.name)}</strong><small>${remainingLabel(h.days)} · Due ${niceDate(c.dueDate)}</small></div><div class="bar-track" role="progressbar" aria-label="${esc(c.name)} estimated interval remaining" aria-valuenow="${h.pct}" aria-valuemin="0" aria-valuemax="100"><div class="bar-fill ${h.kind}" style="width:${h.pct}%"></div></div></div><span class="comp-status ${h.kind}">${h.label}</span>${!compact?`<button type="button" class="button small ghost" data-action="edit-component" data-id="${esc(c.id)}" aria-label="Edit ${esc(c.name)} maintenance interval">EDIT</button>`:''}</div>`}).join('')}</div>`;}
+  function componentRows(bike,compact=true){
+    const comps=activeComps(bike.id);
+    if(!comps.length)return '<div class="empty-state"><h3>No active maintenance components</h3><p>Add a catalog or custom component to start tracking this motorcycle.</p>'+button('add-component','ADD COMPONENT')+'</div>';
+    return '<div class="component-list">'+comps.slice(0,compact?4:comps.length).map(c=>{
+      const h=health(c);
+      return '<div class="component-row"><div class="comp-icon">'+icon(c.icon)+'</div><div><div class="comp-row-title"><strong>'+esc(c.name)+'</strong><small>'+remainingLabel(h.days)+' · Due '+niceDate(c.dueDate)+'</small></div>'+
+        '<div class="bar-track" role="progressbar" aria-label="'+esc(c.name)+' estimated interval remaining" aria-valuenow="'+h.pct+'" aria-valuemin="0" aria-valuemax="100"><div class="bar-fill '+h.kind+'" style="width:'+h.pct+'%"></div></div>'+
+        (c.notes&&!compact?'<small class="component-note">'+esc(c.notes)+'</small>':'')+'</div><span class="comp-status '+h.kind+'">'+h.label+'</span>'+
+        (!compact?'<div class="component-row-actions"><button class="button small ghost" data-action="edit-component" data-id="'+esc(c.id)+'" aria-label="Edit '+esc(c.name)+'">EDIT</button>'+
+        '<button class="button small ghost" data-action="archive-component" data-id="'+esc(c.id)+'" aria-label="Archive '+esc(c.name)+'">ARCHIVE</button>'+
+        '<button class="button small ghost danger-action" data-action="delete-component" data-id="'+esc(c.id)+'" aria-label="Permanently delete '+esc(c.name)+'">DELETE</button></div>':'')+'</div>';
+    }).join('')+'</div>';
+  }
   const noBike = () => `<div class="panel empty-state">${icon('bike','xl')}<h3>No motorcycles yet</h3><p>Add your first motorcycle to start tracking its maintenance schedule.</p>${button('add-bike','Add Motorcycle')}</div>`;
   function riderDash(){const bike=ensureBike();if(!bike)return head('RIDER // OVERVIEW','Dashboard','Your motorcycle command center.')+noBike();const comps=activeComps(bike.id),alarms=alertsForBike(bike),next=comps.map(c=>({...c,days:health(c).days})).sort((a,b)=>a.days-b.days)[0];const services=state.services.filter(s=>s.bikeId===bike.id).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
     return `${head('RIDER // SYSTEM OVERVIEW','Command Center','Your motorcycle. Your maintenance. Complete control.',`<button class="button small ghost" data-action="add-bike">${icon('plus')} ADD BIKE</button>${button('log-service','LOG SERVICE','calendar')}`)}<div class="dashboard-grid"><section class="panel moto-profile"><div><div class="label">PRIMARY VEHICLE // ACTIVE</div><h2>${esc(bike.model)}</h2><p>${esc(bike.year)} model • Plate ${esc(bike.plate||'Not entered')}</p><div class="bike-id">UNIT ID // ${esc(bike.id.slice(-7).toUpperCase())}</div><div style="margin-top:13px"><span class="pill good"><span class="status-dot ok static"></span> PROFILE ACTIVE</span></div></div>${blueprint('blueprint-small')}</section><section class="panel status-panel ${alarms.length?'warning':'success'}"><div class="maintenance-flag"><span class="label">MAINTENANCE WATCH</span>${icon('alert','large')}</div><div><div class="alert-number" style="${alarms.length?'':'color:#A2FFA6;text-shadow:none'}">${String(alarms.length).padStart(2,'0')}</div><div class="label">${alarms.length?'SERVICE ITEMS NEED ATTENTION':'ALL SERVICE ITEMS ON TRACK'}</div><div class="progress-track"><div class="progress-bar" style="width:${Math.round(100*(comps.length-alarms.length)/Math.max(1,comps.length))}%"></div></div><small>Based on service dates; reminders update automatically.</small></div><a class="linkline" href="#/rider/maintenance">VIEW MAINTENANCE ${icon('arrow')}</a></section></div><div class="metric-grid">${metric('NEXT SERVICE DATE',next?niceDate(next.dueDate):'—','','calendar')}${metric('OPEN ALERTS',String(alarms.length).padStart(2,'0'),'ITEMS','alert')}${metric('DAYS TO SERVICE',next?remainingLabel(next.days):'—','','clock')}${metric('SERVICE SPENDING',cash(totalCosts(bike)),'','chart')}</div><div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="label">DATE-BASED SERVICE INTERVALS</div><h2>Component Health <span style="font-size:12px;color:var(--muted);font-family:var(--mono)">// ESTIMATED</span></h2></div><a class="linkline" href="#/rider/components">ALL ${icon('chevron')}</a></div>${componentRows(bike)}<div class="quick-actions"><button class="button small" data-action="log-service">${icon('plus')} LOG SERVICE</button></div></section><section class="panel"><div class="panel-head"><div><div class="label">EVENT LOG // RECENT</div><h2>Service History</h2></div><a class="linkline" href="#/rider/history">VIEW ALL ${icon('chevron')}</a></div>${services.length?services.map(s=>`<div class="service-mini"><span class="mini-marker">${icon('wrench')}</span><span><strong>${esc(s.type)}</strong><small>${niceDate(s.date)} • ${esc(s.shop)}</small></span><span class="cost">${cash(s.cost)}</span></div>`).join(''):'<p class="text-muted">No service records yet.</p>'}<div class="quick-actions"><button class="button small" data-action="log-service">${icon('plus')} ADD RECORD</button></div></section></div><p class="pricing-note" style="margin-top:17px">SYSTEM NOTE: Calendar reminders are not live mechanical diagnostics. Follow your manufacturer's mileage-based service requirements when they are earlier.</p>`;
   }
   function motorcyclesPage(){return `${head('RIDER // GARAGE','My Motorcycles','Manage your motorcycles without recurring odometer entry.',button('add-bike','ADD MOTORCYCLE'))}<div class="cards-grid">${state.bikes.map(b=>`<article class="panel vehicle-card"><div class="label">MOTORCYCLE PROFILE // ${b.id===state.selectedBike?'SELECTED':'STANDBY'}</div>${blueprint('blueprint-small')}<h3>${esc(b.model)}</h3><small>${esc(b.year)} • ${esc(b.plate||'No plate entered')}</small><div class="stat-mini"><span>NEXT SERVICE</span><strong>${niceDate(nextServiceDate(b))}</strong></div><div class="card-actions">${b.id===state.selectedBike?'<span class="pill good">ACTIVE</span>':`<button class="button small ghost" data-action="select-bike" data-id="${b.id}">SELECT BIKE</button>`}<button class="button small" data-action="edit-bike" data-id="${b.id}">${icon('edit')} EDIT</button><button class="button small ghost" data-action="delete-bike" data-id="${esc(b.id)}" aria-label="Delete ${esc(b.model)}">${icon('trash')} DELETE</button></div></article>`).join('')}<button type="button" data-action="add-bike" class="panel vehicle-card empty-state" style="border-style:dashed;cursor:pointer;width:100%">${icon('plus','xl')}<h3>Add Another Motorcycle</h3><p>Track each bike's individual maintenance history.</p></button></div>`;}
-  function componentsPage(){const b=ensureBike();return `${head('RIDER // TECHNICAL READOUT','Components','Track service intervals for each motorcycle component.',button('log-service','LOG SERVICE'))}${b?`<div class="alert-strip">${icon('info')} Status is calculated from calendar dates. Set service intervals to match your motorcycle's recommended maintenance schedule.</div><section class="panel"><div class="panel-head"><div><div class="label">${esc(b.model.toUpperCase())} // DATE-BASED SERVICE</div><h2>Service Interval Monitor</h2></div><span class="system-status"><span class="status-dot"></span> TRACKING ACTIVE</span></div>${componentRows(b,false)}<div class="quick-actions">${button('log-service','RECORD COMPLETED SERVICE','calendar',false)}</div></section>`:noBike()}`;}
+  function componentsPage(){
+    const b=ensureBike();
+    const actions=button('add-component','ADD COMPONENT','plus')+' '+button('log-service','LOG SERVICE','calendar',false);
+    if(!b)return head('RIDER // TECHNICAL READOUT','Components','Manage maintenance for each motorcycle.',actions)+noBike();
+    const active=activeComps(b.id),archived=archivedComps(b.id),soon=active.filter(c=>health(c).kind!=='good');
+    return head('RIDER // TECHNICAL READOUT','Components','Add maintenance items from a catalog or create your own custom components.',actions)+
+      '<div class="alert-strip">'+icon('info')+' All schedules are date-based estimates. Confirm service intervals against your motorcycle manual.</div>'+
+      '<div class="metric-grid">'+metric('ACTIVE COMPONENTS',String(active.length),'ITEMS','settings')+
+      metric('ON TRACK',String(active.length-soon.length),'ITEMS','checkCircle')+
+      metric('DUE SOON / OVERDUE',String(soon.length),'ITEMS','alert')+
+      metric('ARCHIVED',String(archived.length),'ITEMS','history')+'</div>'+
+      '<section class="panel"><div class="panel-head"><div><div class="label">'+esc(b.model.toUpperCase())+' // DATE-BASED SERVICE</div><h2>Service Interval Monitor</h2></div><span class="system-status"><span class="status-dot"></span> TRACKING ACTIVE</span></div>'+
+      componentRows(b,false)+'<div class="quick-actions">'+button('add-component','ADD COMPONENT')+' '+button('log-service','RECORD COMPLETED SERVICE','calendar',false)+'</div></section>'+
+      '<section class="panel archived-components"><div class="panel-head"><div><div class="label">COMPONENT LIBRARY // INACTIVE</div><h2>Archived Components ('+archived.length+')</h2></div></div>'+
+      (archived.length?archived.map(c=>'<div class="component-archive-row"><div><strong>'+esc(c.name)+'</strong><small>Archived · Reminder disabled · Last due '+niceDate(c.dueDate)+'</small></div>'+
+        '<div class="component-row-actions"><button class="button small ghost" data-action="restore-component" data-id="'+esc(c.id)+'">RESTORE</button>'+
+        '<button class="button small ghost danger-action" data-action="delete-component" data-id="'+esc(c.id)+'">DELETE PERMANENTLY</button></div></div>').join(''):
+        '<p class="text-muted">No archived components. Archive an item to hide its reminders without losing maintenance history.</p>')+'</section>'+
+      '<p class="connection-note">Deleting a component permanently removes its schedule, but existing service history and expenses are retained.</p>';
+  }
   function maintenancePage(){const b=ensureBike();const arr=b?activeComps(b.id).map(c=>({...c,h:health(c)})).sort((a,b)=>a.h.days-b.h.days):[];return `${head('RIDER // SCHEDULE CONTROL','Maintenance Schedule','Review maintenance dates that update automatically.',button('log-service','RECORD SERVICE'))}${!b?noBike():`<div class="alert-strip">${icon('alert')} Reminder indicators depend on manually maintained records and generic demo intervals; always follow your motorcycle manufacturer's service manual.</div><section class="panel table-panel"><div class="panel-head"><div><div class="label">UPCOMING MAINTENANCE MATRIX</div><h2>Scheduled Services</h2></div></div><table class="data-table"><thead><tr><th>Component</th><th>Last Service</th><th>Due Date</th><th>Days Remaining</th><th>Status</th></tr></thead><tbody>${arr.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${niceDate(c.lastServiceDate)}</td><td>${niceDate(c.dueDate)}</td><td>${remainingLabel(c.h.days)}</td><td><span class="pill ${c.h.kind}">${c.h.label}</span></td></tr>`).join('')}</tbody></table></section>`}`;}
   function historyPage(){const b=ensureBike();const entries=state.services.filter(x=>x.bikeId===b?.id).sort((a,c)=>c.date.localeCompare(a.date));return `${head('RIDER // MAINTENANCE ARCHIVE','Service History','Your saved repairs and maintenance expenses.',button('log-service','ADD SERVICE RECORD'))}${!b?noBike():`<div class="metric-grid">${metric('TOTAL RECORDS',num(entries.length),'ENTRIES','history')}${metric('LIFETIME SPEND',cash(totalCosts(b)),'','chart')}${metric('NEXT SERVICE',niceDate(nextServiceDate(b)),'','calendar')}${metric('VEHICLE',esc(String(b.year)),'MODEL YEAR','bike')}</div><section class="panel table-panel"><div class="panel-head"><div><div class="label">SERVICE ACTIVITY LOG</div><h2>Maintenance Entries</h2></div><button class="button small ghost" data-action="export-services">${icon('download')} EXPORT CSV</button></div>${entries.length?`<table class="data-table"><thead><tr><th>Date</th><th>Service</th><th>Workshop</th><th>Cost</th></tr></thead><tbody>${entries.map(s=>`<tr><td>${niceDate(s.date)}</td><td><strong>${esc(s.type)}</strong>${s.notes?`<div class="text-muted" style="font-size:10px">${esc(s.notes)}</div>`:''}</td><td>${esc(s.shop)}</td><td>${cash(s.cost)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty-state"><h3>No services recorded</h3><p>Start your maintenance timeline by adding a service entry.</p></div>'}</section>`}`;}
   function shopDash(){const total=state.customers.length,active=state.jobs.filter(j=>j.status!=='Completed').length,appointments=state.appointments.filter(x=>x.date>=today()).length,revenue=state.jobs.filter(j=>j.status==='Completed').reduce((a,j)=>a+j.cost,0);
@@ -228,16 +261,69 @@
   function openModal(type,id=''){
     let title='',subtitle='',fields='',submit='SAVE RECORD',record=null;
     if(type==='add-bike'||type==='edit-bike'){record=state.bikes.find(b=>b.id===id)||null;title=record?'Edit Motorcycle':'Add Motorcycle';subtitle='Enter motorcycle details to maintain a service profile.';fields=`${field('model','Motorcycle make & model','text',record?.model||'','required maxlength="70"') }<div class="form-grid">${field('year','Model year','number',record?.year||2024,'min="1950" max="2100" required')}${field('plate','Plate number (optional)','text',record?.plate||'','maxlength="25"')}</div>`;submit=record?'SAVE CHANGES':'ADD MOTORCYCLE';}
-    else if(type==='edit-component'){record=state.components.find(c=>c.id===id);if(!record)return toast('Component not found.');title='Edit Maintenance Interval';subtitle='Set days between servicing and the date the component was last serviced. Future due dates are calculated for you.';fields=`${field('intervalDays','Service interval (days)','number',record.intervalDays||90,'min="1" max="3650" required')}${field('lastServiceDate','Last service date','date',record.lastServiceDate||today(),`max="${today()}" required`)}`;submit='SAVE INTERVAL';}
+    else if(type==='add-component'||type==='edit-component'){
+      const b=ensureBike();if(!b)return toast('Add a motorcycle before adding components.');
+      record=type==='edit-component'?state.components.find(c=>c.id===id):null;
+      if(type==='edit-component'&&(!record||record.archived))return toast('Restore this component before editing it.');
+      const isEdit=Boolean(record),mode=record?.lastServiceDate?'last':'next';
+      title=isEdit?'Edit Component':'Add Component';subtitle=isEdit?'Update component settings and maintenance reminders.':'Choose a catalog item or create a custom maintenance component.';
+      const options=(state.componentCatalog||[]).map(x=>[x.name,x.name+' · suggested '+x.suggestedDays+' days']);
+      if(!isEdit){
+        fields='<div class="component-source-tabs"><label class="component-choice"><input type="radio" name="source" value="catalog" checked> FROM CATALOG</label>'+
+          '<label class="component-choice"><input type="radio" name="source" value="custom"> CUSTOM COMPONENT</label></div>'+
+          '<div data-component-panel="catalog">'+selectField('catalogName','Catalog item',options,options[0]?.[0])+'</div>'+
+          '<div data-component-panel="custom" class="hidden">'+field('name','Custom component name','text','','maxlength="70" minlength="2" disabled')+'</div>';
+      }else{
+        fields=record.source==='custom'?field('name','Custom component name','text',record.name,'required maxlength="70" minlength="2"'):
+          '<div class="field"><label>Component</label><strong>'+esc(record.name)+'</strong><small class="text-muted">Catalog or default component names are fixed.</small></div>';
+      }
+      fields+='<div class="form-grid">'+field('intervalDays','Service interval (days)','number',record?.intervalDays||state.componentCatalog[0]?.suggestedDays||90,'min="1" max="3650" required')+
+        selectField('dateMode','Schedule based on',[['next','Next due date (last service unknown)'],['last','Known last service date']],mode)+'</div>'+
+        '<div data-component-date="last" class="'+(mode==='last'?'':'hidden')+'">'+field('lastServiceDate','Last service date','date',record?.lastServiceDate||today(),(mode==='last'?'required ':'disabled ')+`max="${today()}"`)+'</div>'+
+        '<div data-component-date="next" class="'+(mode==='next'?'':'hidden')+'">'+field('dueDate','Next planned service date','date',record?.dueDate||dateShift(90),(mode==='next'?'required':'disabled'))+'</div>'+
+        '<div class="field"><label for="f-component-notes">Notes (optional)</label><textarea id="f-component-notes" name="notes" maxlength="300" rows="3" placeholder="Parts, servicing details or reminders">'+esc(record?.notes||'')+'</textarea></div>'+
+        '<p class="component-schedule-preview">Due date: <strong data-component-preview>Set schedule above</strong></p>'+
+        '<p class="text-muted" style="font-size:11px">Suggested catalog intervals are examples only, not verified manufacturer specifications.</p>';
+      submit=isEdit?'SAVE COMPONENT':'ADD COMPONENT';
+    }
 
-    else if(type==='log-service'){const b=ensureBike();if(!b)return toast('Please add a motorcycle first.');title='Record Maintenance';subtitle='The service date automatically schedules the next maintenance reminder.';const options=activeComps(b.id).map(c=>c.name).concat(['Other Service']);fields=`${selectField('type','Service type',options)}<div class="form-grid">${field('date','Service completed on','date',today(),`max="${today()}" required`)}</div><div class="form-grid">${field('cost','Cost (PHP)','number',0,'min="0" step="0.01" required')}${field('shop','Workshop name','text','Self / Local Mechanic','required maxlength="70"')}</div><div class="field"><label for="f-notes">Notes (optional)</label><textarea id="f-notes" name="notes" maxlength="300" placeholder="Parts changed, observations, or details"></textarea></div>`;submit='SAVE SERVICE ENTRY';}
+    else if(type==='log-service'){const b=ensureBike();if(!b)return toast('Please add a motorcycle first.');title='Record Maintenance';subtitle='Record completed service for an active component to update its due date.';const options=activeComps(b.id).map(c=>[c.id,c.name]).concat([['','Other Service (without scheduled component)']]);fields=`${selectField('componentId','Serviced component',options,options[0]?.[0])}<div class="form-grid">${field('date','Service completed on','date',today(),`max="${today()}" required`)}</div><div class="form-grid">${field('cost','Cost (PHP)','number',0,'min="0" step="0.01" required')}${field('shop','Workshop name','text','Self / Local Mechanic','required maxlength="70"')}</div><div class="field"><label for="f-notes">Notes (optional)</label><textarea id="f-notes" name="notes" maxlength="300" placeholder="Parts changed, observations, or details"></textarea></div>`;submit='SAVE SERVICE ENTRY';}
     else if(type==='add-customer'||type==='edit-customer'){record=type==='edit-customer'?state.customers.find(c=>c.id===id):null;title=record?'Edit Customer':'Register Customer';subtitle='Maintain this workshop customer record.';fields=`${field('name','Customer name','text',record?.name||'','required maxlength="80"')}${field('contact','Email or contact information','text',record?.contact||'','required maxlength="100"')}${field('motorcycle','Motorcycle model','text',record?.motorcycle||'','required maxlength="80"')}${field('odometer','Current mileage (km)','number',record?.odometer??0,'min="0" required')}`;submit=record?'SAVE CUSTOMER':'REGISTER CUSTOMER';}
     else if(type==='add-job'||type==='edit-job'){if(!state.customers.length)return toast('Add a customer before creating a job.');record=type==='edit-job'?state.jobs.find(j=>j.id===id):null;title=record?'Edit Service Job':'Create Service Job';subtitle='Manage customer work orders and estimates.';fields=`${selectField('customerId','Customer',state.customers.map(c=>[c.id,c.name+' • '+c.motorcycle]),record?.customerId)}${field('service','Service description','text',record?.service||'','required maxlength="100"')}<div class="form-grid">${field('date','Job date','date',record?.date||today(),'required')}${field('cost','Estimated cost (PHP)','number',record?.cost??0,'min="0" step="0.01" required')}</div>${selectField('status','Job status',record?.status==='Completed'?['Completed']:record?.status==='In Progress'?['In Progress','Completed']:['Pending','In Progress','Completed'],record?.status||'Pending')}`;submit=record?'SAVE JOB':'CREATE SERVICE JOB';}
     else if(type==='add-appointment'||type==='edit-appointment'){if(!state.customers.length)return toast('Add a customer before booking.');record=type==='edit-appointment'?state.appointments.find(a=>a.id===id):null;title=record?'Edit Appointment':'Book Appointment';subtitle='Schedule and update a customer visit.';fields=`${selectField('customerId','Customer',state.customers.map(c=>[c.id,c.name+' • '+c.motorcycle]),record?.customerId)}${field('service','Requested service','text',record?.service||'','required maxlength="100"')}<div class="form-grid">${field('date','Date','date',record?.date||dateShift(1),'required')}${field('time','Time','time',record?.time||'09:00','required')}</div>${record?selectField('status','Appointment status',['Pending','Confirmed','Completed','Cancelled'],record.status):''}`;submit=record?'SAVE APPOINTMENT':'BOOK APPOINTMENT';}
     else return;
     lastFocus=document.activeElement;
     modalRoot.innerHTML=`<div class="overlay" data-action="overlay"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button type="button" class="icon-button modal-close" data-action="close-modal" aria-label="Close dialog">${icon('x')}</button><div class="label">MOTOKARE // DATA ENTRY</div><h2 id="modal-title">${title}</h2><p class="modal-sub">${subtitle}</p><form data-form="${type}" data-id="${esc(id)}">${fields}<div class="form-footer"><button type="button" class="button ghost" data-action="close-modal">CANCEL</button><button type="submit" class="button primary">${icon('check')} ${submit}</button></div></form></section></div>`;
+    if(type==='add-component'||type==='edit-component')syncComponentModal();
     $('#modal-root .modal-close')?.focus();document.body.style.overflow='hidden';
+  }
+  function syncComponentModal(){
+    const form=modalRoot.querySelector?.('form[data-form="add-component"],form[data-form="edit-component"]');
+    if(!form)return;
+    const selected=form.querySelector('input[name="source"]:checked')?.value||'catalog';
+    for(const name of ['catalog','custom']){
+      const panel=form.querySelector('[data-component-panel="'+name+'"]');
+      if(!panel)continue;
+      panel.classList.toggle('hidden',selected!==name);
+      for(const el of panel.querySelectorAll('input,select'))el.disabled=selected!==name;
+    }
+    const mode=form.querySelector('[name="dateMode"]')?.value||'next';
+    for(const name of ['last','next']){
+      const panel=form.querySelector('[data-component-date="'+name+'"]');
+      if(!panel)continue;
+      panel.classList.toggle('hidden',mode!==name);
+      for(const el of panel.querySelectorAll('input')){el.disabled=mode!==name;el.required=mode===name;}
+    }
+    const interval=Number(form.querySelector('[name="intervalDays"]')?.value||0);
+    const sourceDate=mode==='last'?form.querySelector('[name="lastServiceDate"]')?.value:form.querySelector('[name="dueDate"]')?.value;
+    let preview='Choose a date and service interval';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(sourceDate||'')&&Number.isInteger(interval)&&interval>=1&&interval<=3650){
+      const d=new Date(sourceDate+'T12:00:00Z');
+      if(mode==='last')d.setUTCDate(d.getUTCDate()+interval);
+      preview=d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric',timeZone:'UTC'});
+    }
+    const output=form.querySelector('[data-component-preview]');
+    if(output)output.textContent=preview;
   }
   function closeModal(){modalRoot.innerHTML='';document.body.style.overflow='';lastFocus?.focus?.();}
   function formVal(form){const d=new FormData(form);return Object.fromEntries(d.entries());}
@@ -270,9 +356,24 @@
       const success=await persist(type==='edit-bike'?'/bikes/'+encodeURIComponent(id):'/bikes',type==='edit-bike'?'PATCH':'POST',payload,type==='edit-bike'?'Motorcycle details updated.':'Motorcycle added to your garage.');
       if(success&&type==='add-bike'){state.selectedBike=state.bikes[0]?.id;render();}return;
     }
-    if(type==='edit-component'){await persist('/components/'+encodeURIComponent(id),'PATCH',{intervalDays:Number(v.intervalDays),lastServiceDate:v.lastServiceDate},'Service interval updated.');return;}
+    if(type==='add-component'||type==='edit-component'){
+      if(!bike)return toast('Add a motorcycle first.');
+      const payload={intervalDays:Number(v.intervalDays),notes:v.notes||'',
+        lastServiceDate:v.dateMode==='last'?v.lastServiceDate:null,
+        ...(v.dateMode==='next'?{dueDate:v.dueDate}:{})};
+      if(type==='add-component'){
+        payload.bikeId=bike.id;payload.source=v.source;
+        if(v.source==='catalog')payload.catalogName=v.catalogName;else payload.name=v.name;
+      }else{
+        const item=state.components.find(c=>c.id===id);
+        if(item?.source==='custom')payload.name=v.name;
+      }
+      await persist(type==='add-component'?'/components':'/components/'+encodeURIComponent(id),type==='add-component'?'POST':'PATCH',payload,
+        type==='add-component'?'Maintenance component added.':'Component schedule updated.');
+      return;
+    }
 
-    if(type==='log-service'){if(!bike)return toast('Add a motorcycle first.');await persist('/services','POST',{bikeId:bike.id,type:v.type,date:v.date,cost:Number(v.cost),shop:v.shop,notes:v.notes||''},'Service recorded and interval updated.');return;}
+    if(type==='log-service'){if(!bike)return toast('Add a motorcycle first.');await persist('/services','POST',{bikeId:bike.id,...(v.componentId?{componentId:v.componentId}:{type:'Other Service'}),date:v.date,cost:Number(v.cost),shop:v.shop,notes:v.notes||''},'Service recorded and interval updated.');return;}
     if(type==='add-customer'||type==='edit-customer'){await persist(type==='edit-customer'?'/customers/'+encodeURIComponent(id):'/customers',type==='edit-customer'?'PATCH':'POST',{name:v.name,contact:v.contact,motorcycle:v.motorcycle,odometer:Number(v.odometer)},type==='edit-customer'?'Customer updated.':'Customer added to your shop.');return;}
     if(type==='add-job'||type==='edit-job'){await persist(type==='edit-job'?'/jobs/'+encodeURIComponent(id):'/jobs',type==='edit-job'?'PATCH':'POST',{customerId:v.customerId,service:v.service,date:v.date,status:v.status,cost:Number(v.cost)},type==='edit-job'?'Service job updated.':'Service job created.');return;}
     if(type==='add-appointment'||type==='edit-appointment'){await persist(type==='edit-appointment'?'/appointments/'+encodeURIComponent(id):'/appointments',type==='edit-appointment'?'PATCH':'POST',{customerId:v.customerId,service:v.service,date:v.date,time:v.time,status:v.status},type==='edit-appointment'?'Appointment updated.':'Appointment booked.');return;}
@@ -289,7 +390,16 @@
     if(a==='switch-role'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;state.role=el.dataset.role;mobileOpen=false;notifyOpen=false;navigate('/login');toast('Sign in with a '+(state.role==='shop'?'workshop':'rider')+' account to switch.');}catch(error){toast(error.message);}return;}
     if(a==='notifications'){notifyOpen=!notifyOpen;render();return;}
     if(a==='logout'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;mobileOpen=false;notifyOpen=false;navigate('/');toast('Signed out successfully.');}catch(error){toast(error.message);}return;}
-    if(['add-bike','edit-bike','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment'].includes(a)){openModal(a,id);return;}
+    if(['add-bike','edit-bike','add-component','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment'].includes(a)){openModal(a,id);return;}
+    if(a==='archive-component'||a==='restore-component'){
+      const archived=a==='archive-component';
+      if(archived&&!confirm('Archive this component? Its reminders will be paused, and you can restore it later.'))return;
+      await persist('/components/'+encodeURIComponent(id)+'/archive','PATCH',{archived},archived?'Component archived.':'Component restored.',{close:false});return;
+    }
+    if(a==='delete-component'){
+      if(!confirm('PERMANENTLY DELETE this component? Its schedule cannot be restored. All recorded service history and expenses will remain.'))return;
+      await persist('/components/'+encodeURIComponent(id),'DELETE',undefined,'Component permanently deleted. Service history preserved.',{close:false});return;
+    }
     if(a==='reset-shop-search'){shopFilters={query:'',city:'',service:''};shopResults=null;render();return;}
      if(a==='connect-shop'){await persist('/connections','POST',{shopId:id},'Connection request sent. Await workshop approval.',{close:false});return;}
      if(a==='approve-connection'||a==='decline-connection'){await persist('/connections/'+encodeURIComponent(id),'PATCH',{status:a==='approve-connection'?'accepted':'declined'},a==='approve-connection'?'Connection approved.':'Request declined.',{close:false});return;}
@@ -308,6 +418,16 @@
     if(a==='delete-appointment'){if(confirm('Delete this appointment? This cannot be undone.'))await persist('/appointments/'+encodeURIComponent(id),'DELETE',undefined,'Appointment deleted.',{close:false});return;}
   }
   document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(el)clickAction(el,e);else if(notifyOpen&&!e.target.closest('.notify-panel')){notifyOpen=false;render();}});
+  document.addEventListener('change',e=>{
+    const form=e.target.closest?.('form[data-form="add-component"],form[data-form="edit-component"]');
+    if(!form)return;
+    if(e.target.name==='catalogName'){
+      const item=state.componentCatalog.find(x=>x.name===e.target.value);
+      const interval=form.querySelector('[name="intervalDays"]');
+      if(item&&interval)interval.value=item.suggestedDays;
+    }
+    syncComponentModal();
+  });
   document.addEventListener('submit',e=>{const form=e.target.closest('[data-form]');if(!form)return;e.preventDefault();handleForm(form);});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(modalRoot.innerHTML)closeModal();else if(notifyOpen){notifyOpen=false;render();}else if(mobileOpen){mobileOpen=false;render();}}if(e.key==='Tab'&&modalRoot.innerHTML){const links=[...modalRoot.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')];if(!links.length)return;const first=links[0],last=links[links.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
   window.addEventListener('hashchange',()=>{mobileOpen=false;notifyOpen=false;closeModal();render();window.scrollTo({top:0,behavior:'auto'});});
