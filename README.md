@@ -147,3 +147,10 @@ This copies users (including existing scrypt password hashes), motorcycles, main
 - This release has in-app maintenance reminders calculated from **calendar dates**, not motorcycle sensor diagnostics or external email/SMS delivery. Rider and shop accounts do not share records without a future consent-based linking system.
 
 **Development status:** Frontend and API source have been migrated to PostgreSQL. Real PostgreSQL integration tests require a PostgreSQL instance; don't assume production readiness from syntax tests alone.
+## Phase 4.1 — Opt-in Rider–Workshop Connections
+
+A signed-in rider opens **Repair Shops** and requests a connection to a registered workshop. The workshop reviews incoming requests under **Rider Connections**, approves or declines them, and either party can remove a relationship. Requests are shown in workshop notifications. No existing records are modified.
+
+The additive `account_connections` table tracks the unique rider/workshop pair and its `pending`, `accepted`, or `declined` state. Duplicate requests are rejected, and only the addressed shop can approve or decline. A connection does **not** share rider email, motorcycles, expenses or service history, and does not create an appointment or shop customer record. Those are future phases. The directory shows only workshop names and IDs. Existing jobs, appointments, and service records remain scoped to the original account.
+
+API: `GET /api/shops` (rider), `GET /api/connections` (both), `POST /api/connections` `{ "shopId": "..." }` (rider), `PATCH /api/connections/:id` `{ "status": "accepted" | "declined" }` (target shop only), `DELETE /api/connections/:id` (either participant). `GET /api/bootstrap` returns the role-scoped connection list and rider-only workshop directory.
