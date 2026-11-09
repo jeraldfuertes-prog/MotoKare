@@ -80,7 +80,7 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  riderPage.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'log-service'},values:{
   componentId:custom.id,date:serviceDate,cost:'35',shop:'Garage UI Test',notes:'Inspected'
  }})}});
- await wait(()=>riderPage.elements['#app'].innerHTML.includes('UI Custom Component'));
+ await wait(()=>riderPage.elements['#toast-root'].innerHTML.includes('Service recorded and interval updated.'));
  componentState=(await send(base,'/api/bootstrap','GET',undefined,rider.cookie)).data;
  assert.ok(componentState.services.some(x=>x.componentId===custom.id&&x.type==='UI Custom Component'));
  assert.equal(componentState.components.find(c=>c.id===custom.id).lastServiceDate,serviceDate);
