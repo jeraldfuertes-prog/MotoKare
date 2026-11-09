@@ -13,6 +13,14 @@ const files={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/st
 const mimes={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 const base=path.resolve(__dirname,'../frontend');
 const catalog=[['Engine Oil','bolt',2000,30],['Brake Inspection','shield',4500,60],['Air Filter','filter',6000,90],['Chain & Sprocket','settings',2100,45],['Battery Check','bolt',7000,120],['Tire Inspection','target',4700,60]];
+const componentCatalog=[
+ ...catalog.map(([name,icon,,days])=>({name,icon,suggestedDays:days})),
+ ...[
+ ['Spark Plug','bolt',90],['Brake Fluid','shield',180],['Coolant','filter',180],
+ ['Drive Belt (CVT)','settings',180],['Fuel Filter','filter',120],['Fork Oil','settings',180],
+ ['Valve Clearance','settings',180],['Clutch Inspection','wrench',120]
+ ].map(([name,icon,suggestedDays])=>({name,icon,suggestedDays}))
+];
 const SHOP_SERVICES=['Oil Change','Brake Service','Tire Service','Chain & Sprocket','Battery Service','Air Filter','Engine Repair','General Inspection','Other'];
 const fail=(code,message)=>{const e=new Error(message);e.status=code;throw e;};
 const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const a=Object.fromEntries(p.map(x=>[x.type,x.value]));return a.year+'-'+a.month+'-'+a.day;};
@@ -137,40 +145,117 @@ async function api(req,res,url){
   }
   if(method==='DELETE'&&!m[2]){await stmt('DELETE FROM bikes WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}
  }
- if(path==='/api/components'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{components:await componentRows(user.id)});}
- m=path.match(/^\/api\/components\/([^/]+)$/);
- if(m&&method==='PATCH'){
-  await requireUser(req,'rider');await requireOwn('components',m[1],user);const b=await body(req);
-   if(b.intervalDays===undefined && b.interval!==undefined){
-    const interval=integer(b.interval,'Interval',1,1000000),last=integer(b.lastKm,'Last serviced mileage'),due=date(b.dueDate,'Due date');
-    await stmt('UPDATE components SET interval=?,last_km=?,next_km=?,due_date=? WHERE id=? AND user_id=?').run(interval,last,last+interval,due,m[1],user.id);
-    return send(res,200,{ok:true});
-   }
-   const intervalDays=integer(b.intervalDays,'Service interval (days)',1,3650),last=date(b.lastServiceDate,'Last service date');
-   if(last>today())fail(400,'Last service date cannot be in the future');
-   const due=later(intervalDays,last);
-   await stmt('UPDATE components SET interval_days=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?').run(intervalDays,last,due,m[1],user.id);
-   return send(res,200,{ok:true,dueDate:due});
+ // Catalog intervals are suggestions only; consult the motorcycle manufacturer.
+ if(path==='/api/component-catalog'&&method==='GET'){
+  await requireUser(req,'rider');
+  return send(res,200,{catalog:componentCatalog});
+ }
+ if(path==='/api/components'&&method==='GET'){
+  await requireUser(req,'rider');
+  return send(res,200,{components:await componentRows(user.id)});
+ }
+ if(path==='/api/components'&&method==='POST'){
+  await requireUser(req,'rider');const b=await body(req);
+  const bikeId=text(b.bikeId,'Motorcycle ID',64);await requireOwn('bikes',bikeId,user);
+  const source=status(b.source,['catalog','custom']);
+  const selected=source==='catalog'?componentCatalog.find(c=>c.name===b.catalogName):null;
+  if(source==='catalog'&&!selected)fail(400,'Select a component from the catalog');
+  const name=selected?.name||text(b.name,'Component name',70,{min:2});
+  const icon=selected?.icon||'settings';
+  const intervalDays=integer(b.intervalDays,'Service interval (days)',1,3650);
+  const notes=text(b.notes??'','Component notes',300,{min:0});
+  const last=b.lastServiceDate===null||b.lastServiceDate===undefined||b.lastServiceDate===''?null:date(b.lastServiceDate,'Last service date');
+  if(last&&last>today())fail(400,'Last service date cannot be in the future');
+  if(last&&b.dueDate)fail(400,'Use last service date or next due date, not both');
+  const due=last?later(intervalDays,last):date(b.dueDate,'Next due date');
+  const count=await stmt('SELECT COUNT(*)::int AS count FROM components WHERE bike_id=? AND user_id=?').get(bikeId,user.id);
+  if(count.count>=150)fail(400,'This motorcycle has reached the component limit');
+  const bike=await stmt('SELECT odometer FROM bikes WHERE id=? AND user_id=?').get(bikeId,user.id);
+  const id=randomUUID();
+  try{
+   await stmt('INSERT INTO components(id,user_id,bike_id,name,icon,interval,last_km,next_km,due_date,interval_days,last_service_date,source,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id,user.id,bikeId,name,icon,1,bike.odometer,bike.odometer+1,due,intervalDays,last,source,notes);
+  }catch(err){if(err.code==='23505')fail(409,'This motorcycle already has an active component with that name');throw err;}
+  return send(res,201,{id,dueDate:due});
+ }
+ let componentMatch=path.match(/^\/api\/components\/([^/]+)$/);
+ if(componentMatch&&method==='PATCH'){
+  await requireUser(req,'rider');
+  const id=componentMatch[1],old=await stmt('SELECT id,name,source,interval_days,last_service_date,due_date,notes,archived_at FROM components WHERE id=? AND user_id=?').get(id,user.id);
+  if(!old)fail(404,'Component not found');
+  if(old.archived_at)fail(409,'Restore this component before editing it');
+  const b=await body(req);
+  // Preserve compatibility with legacy mileage-only maintenance interval updates.
+  if(b.intervalDays===undefined&&b.interval!==undefined){
+   const interval=integer(b.interval,'Interval',1,1000000),last=integer(b.lastKm,'Last serviced mileage'),due=date(b.dueDate,'Due date');
+   await stmt('UPDATE components SET interval=?,last_km=?,next_km=?,due_date=? WHERE id=? AND user_id=?').run(interval,last,last+interval,due,id,user.id);
+   return send(res,200,{ok:true});
+  }
+  const intervalDays=integer(b.intervalDays??old.interval_days,'Service interval (days)',1,3650);
+  const name=b.name===undefined?old.name:text(b.name,'Component name',70,{min:2});
+  if(old.source!=='custom'&&name!==old.name)fail(400,'Only custom component names can be changed');
+  const notes=b.notes===undefined?old.notes:text(b.notes,'Component notes',300,{min:0});
+  const last=b.lastServiceDate===undefined?old.last_service_date:
+    b.lastServiceDate===null||b.lastServiceDate===''?null:date(b.lastServiceDate,'Last service date');
+  if(last&&last>today())fail(400,'Last service date cannot be in the future');
+  if(last&&b.dueDate)fail(400,'Use last service date or next due date, not both');
+  const due=last?later(intervalDays,last):(b.dueDate?date(b.dueDate,'Next due date'):old.due_date);
+  try{
+   await stmt('UPDATE components SET name=?,notes=?,interval_days=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?')
+    .run(name,notes,intervalDays,last,due,id,user.id);
+  }catch(err){if(err.code==='23505')fail(409,'This motorcycle already has an active component with that name');throw err;}
+  return send(res,200,{ok:true,dueDate:due});
+ }
+ const archivedMatch=path.match(/^\/api\/components\/([^/]+)\/archive$/);
+ if(archivedMatch&&method==='PATCH'){
+  await requireUser(req,'rider');
+  const b=await body(req);if(typeof b.archived!=='boolean')fail(400,'Archived must be true or false');
+  try{
+   const result=await stmt('UPDATE components SET archived_at=CASE WHEN ? THEN NOW() ELSE NULL END WHERE id=? AND user_id=? RETURNING id').get(b.archived,archivedMatch[1],user.id);
+   if(!result)fail(404,'Component not found');
+  }catch(err){if(err.code==='23505')fail(409,'An active component with this name already exists. Rename or archive the other component first');throw err;}
+  return send(res,200,{ok:true,archived:b.archived});
+ }
+ if(componentMatch&&method==='DELETE'){
+  await requireUser(req,'rider');
+  // services.component_id uses ON DELETE SET NULL, keeping all historical work/expenses intact.
+  const result=await stmt('DELETE FROM components WHERE id=? AND user_id=? RETURNING id').get(componentMatch[1],user.id);
+  if(!result)fail(404,'Component not found');
+  return send(res,200,{ok:true,notice:'Service history has been preserved'});
  }
  if(path==='/api/services'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{services:await serviceRows(user.id)});}
  if(path==='/api/services'&&method==='POST'){
   await requireUser(req,'rider');const b=await body(req);await requireOwn('bikes',b.bikeId,user);
-   const type=text(b.type,'Service type',100),d=date(b.date),mileage=b.mileage===undefined?null:integer(b.mileage,'Mileage'),cost=money(b.cost),shop=text(b.shop,'Workshop',70),notes=text(b.notes||'','Notes',300,{min:0});
-   if(d>today())fail(400,'Completed service date cannot be in the future');
+  const selectedId=b.componentId===null||b.componentId===undefined||b.componentId===''?null:text(b.componentId,'Component ID',64);
+  const requestedType=b.type===undefined||b.type===null?null:text(b.type,'Service type',100);
+  if(!requestedType&&!selectedId)fail(400,'Select a component or enter a service type');
+  const d=date(b.date),mileage=b.mileage===undefined?null:integer(b.mileage,'Mileage'),cost=money(b.cost),shop=text(b.shop,'Workshop',70),notes=text(b.notes||'','Notes',300,{min:0});
+  if(d>today())fail(400,'Completed service date cannot be in the future');
   const id=randomUUID();
-  await transaction(async tx => {
-   // Recheck the bike inside the transaction to keep its mileage and service in sync.
-   const current = await tx('SELECT odometer FROM bikes WHERE id=? AND user_id=? FOR UPDATE').get(b.bikeId,user.id);
-   if (!current) fail(404, 'Record not found');
-    const recordedMileage=mileage??current.odometer;
-    if(mileage!==null && mileage>current.odometer+100000)fail(400,'Service mileage exceeds expected range');
-    await tx('INSERT INTO services(id,user_id,bike_id,type,date,mileage,cost,shop,notes) VALUES(?,?,?,?,?,?,?,?,?)').run(id,user.id,b.bikeId,type,d,recordedMileage,cost,shop,notes);
-    if(mileage!==null&&mileage>current.odometer)await tx('UPDATE bikes SET odometer=?,updated=? WHERE id=? AND user_id=?').run(mileage,today(),b.bikeId,user.id);
-    const component=await tx('SELECT id,interval,interval_days,last_service_date FROM components WHERE user_id=? AND bike_id=? AND name=?').get(user.id,b.bikeId,type);
-    if(component&&(!component.last_service_date||d>=component.last_service_date)){
-      const due=later(component.interval_days,d);
-      await tx('UPDATE components SET last_km=?,next_km=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?').run(recordedMileage,recordedMileage+component.interval,d,due,component.id,user.id);
-    }
+  await transaction(async tx=>{
+   const current=await tx('SELECT odometer FROM bikes WHERE id=? AND user_id=? FOR UPDATE').get(b.bikeId,user.id);
+   if(!current)fail(404,'Record not found');
+   const recordedMileage=mileage??current.odometer;
+   if(mileage!==null&&mileage>current.odometer+100000)fail(400,'Service mileage exceeds expected range');
+   let component;
+   if(selectedId){
+    component=await tx('SELECT id,name,interval,interval_days,last_service_date FROM components WHERE id=? AND bike_id=? AND user_id=? AND archived_at IS NULL FOR UPDATE')
+     .get(selectedId,b.bikeId,user.id);
+    if(!component)fail(404,'Active component not found for this motorcycle');
+   }else if(requestedType!=='Other Service'){
+    // Old clients that submit a name instead of a component ID still work.
+    component=await tx('SELECT id,name,interval,interval_days,last_service_date FROM components WHERE bike_id=? AND user_id=? AND name=? AND archived_at IS NULL FOR UPDATE')
+     .get(b.bikeId,user.id,requestedType);
+   }
+   const type=component?.name||requestedType;
+   await tx('INSERT INTO services(id,user_id,bike_id,component_id,type,date,mileage,cost,shop,notes) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(id,user.id,b.bikeId,component?.id||null,type,d,recordedMileage,cost,shop,notes);
+   if(mileage!==null&&mileage>current.odometer)await tx('UPDATE bikes SET odometer=?,updated=? WHERE id=? AND user_id=?').run(mileage,today(),b.bikeId,user.id);
+   if(component&&(!component.last_service_date||d>=component.last_service_date)){
+    const due=later(component.interval_days,d);
+    await tx('UPDATE components SET last_km=?,next_km=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?')
+     .run(recordedMileage,recordedMileage+component.interval,d,due,component.id,user.id);
+   }
   });
   return send(res,201,{id});
  }

@@ -119,3 +119,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_city TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_address TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS shop_description TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS services_offered TEXT[] NOT NULL DEFAULT '{}';
+
+-- Components upgrade: safe additive migration, no deletion or replacement of existing riders' data.
+ALTER TABLE components ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE components ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE components ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+-- Keep service history even when a component is permanently deleted.
+ALTER TABLE services ADD COLUMN IF NOT EXISTS component_id TEXT REFERENCES components(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS services_component ON services(component_id);
+-- Prevent duplicate active components within the same motorcycle, regardless of letter case.
+CREATE UNIQUE INDEX IF NOT EXISTS components_unique_active_name ON components(bike_id,LOWER(name)) WHERE archived_at IS NULL;
