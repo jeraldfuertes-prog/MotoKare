@@ -62,6 +62,9 @@
       <path pathLength="1" d="M141 169 155 139l-23-21-32 2M427 117l20 49M160 179l77-35M435 154l52 20"/>
       <path pathLength="1" d="M102 239h68M135 205v69M477 240h66M510 205v70" opacity=".55"/><path pathLength="1" d="M60 247 33 256M570 246l31 12"/>
     </g><g fill="#00FFFF" opacity=".9"><circle cx="135" cy="240" r="4"/><circle cx="510" cy="240" r="4"/><circle cx="300" cy="157" r="3"/><circle cx="393" cy="178" r="3"/></g><g fill="#86BDCA" font-size="10" font-family="monospace"><text x="46" y="55">FIG 01 // CHASSIS OVERVIEW</text><text x="445" y="303">MOTORCYCLE // SYS</text><text x="302" y="52">0 1 0 1 0</text></g></svg>`; }
+  const SHOP_SERVICES=['Oil Change','Brake Service','Tire Service','Chain & Sprocket','Battery Service','Air Filter','Engine Repair','General Inspection','Other'];
+  let shopFilters={query:'',city:'',service:''},shopResults=null;
+  const shopSearchUrl=()=>'/shops?'+Object.entries({q:shopFilters.query,city:shopFilters.city,service:shopFilters.service}).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
   const componentCatalog=[
     {name:'Engine Oil',icon:'bolt',interval:2000,last:10600,days:12},
     {name:'Brake Inspection',icon:'shield',interval:4500,last:9500,days:40},
@@ -71,7 +74,7 @@
     {name:'Tire Inspection',icon:'target',interval:4700,last:10000,days:65}
   ];
   let state = {version:4, session:null, role:'rider', selectedBike:null,
-    bikes:[], components:[], services:[], customers:[], jobs:[], appointments:[], shops:[], connections:[],
+    bikes:[], components:[], services:[], customers:[], jobs:[], appointments:[], shops:[], connections:[], shopProfile:null,
     settings:{shopName:'',notifications:true,distance:'km'}};
   let loaded = false;
   async function api(endpoint, method='GET', data){
@@ -87,6 +90,8 @@
     if(!selected){try{selected=localStorage.getItem(SELECTION_KEY);}catch{}}
     const incoming=await api('/bootstrap');
     state={...incoming,selectedBike:incoming.bikes.some(b=>b.id===selected)?selected:(incoming.bikes[0]?.id||null)};
+    if(incoming.role==='rider'&&shopResults!==null)shopResults=(await api(shopSearchUrl())).shops;
+    if(incoming.role!=='rider'){shopResults=null;shopFilters={query:'',city:'',service:''};}
     render();
   }
   async function persist(endpoint,method,payload,success,{close=true}={}){
@@ -160,18 +165,32 @@
     const links=state.connections||[];
     if(role==='rider'){
       const byShop=new Map(links.map(x=>[x.shopId,x]));
-      return head('RIDER // WORKSHOP NETWORK','Repair Shops','Connect with a registered workshop after its approval.')+
-        '<div class="alert-strip">'+icon('shield')+' Connecting accounts does NOT share motorcycle details, service history, or costs.</div>'+
-        '<div class="connection-grid">'+(state.shops||[]).map(shop=>{
+      const shops=shopResults===null?(state.shops||[]):shopResults;
+      const serviceOptions='<option value="">All services</option>'+SHOP_SERVICES.map(s=>'<option value="'+esc(s)+'" '+(shopFilters.service===s?'selected':'')+'>'+esc(s)+'</option>').join('');
+      return head('RIDER // WORKSHOP DISCOVERY','Find Repair Shops','Search registered MotoKare workshops by name, city, or available services.')+
+        '<div class="alert-strip">'+icon('shield')+' Workshop listings are owner-provided and unverified. Connecting does NOT share your motorcycle or maintenance records.</div>'+
+        '<section class="panel shop-search-panel"><div class="panel-head"><div><div class="label">DISCOVERY FILTERS // 4.2</div><h2>Search Workshops</h2></div></div>'+
+        '<form data-form="search-shops" class="shop-search-form"><div class="field"><label for="shop-search-term">Shop or keyword</label><input id="shop-search-term" name="query" maxlength="80" placeholder="e.g. Davao, repair" value="'+esc(shopFilters.query)+'"></div>'+
+        '<div class="field"><label for="shop-search-city">City or municipality</label><input id="shop-search-city" name="city" maxlength="80" placeholder="e.g. Davao City" value="'+esc(shopFilters.city)+'"></div>'+
+        '<div class="field"><label for="shop-search-service">Service offered</label><select id="shop-search-service" name="service">'+serviceOptions+'</select></div>'+
+        '<div class="shop-search-actions"><button class="button primary small" type="submit">'+icon('search')+' SEARCH</button><button class="button small ghost" data-action="reset-shop-search" type="button">CLEAR</button></div></form></section>'+
+        '<div class="shop-result-label"><div class="label">WORKSHOP DIRECTORY // '+shops.length+' RESULT'+(shops.length===1?'':'S')+'</div><small>Up to 100 matches; no GPS tracking or verified business ratings.</small></div>'+
+        '<div class="connection-grid shop-results">'+shops.map(shop=>{
           const link=byShop.get(shop.id),st=link?.status||'not connected';
           const act=!link?'<button class="button small primary" data-action="connect-shop" data-id="'+esc(shop.id)+'">REQUEST CONNECTION</button>':
             link.status==='pending'?'<button class="button small ghost" data-action="remove-connection" data-id="'+esc(link.id)+'">CANCEL REQUEST</button>':
             link.status==='accepted'?'<button class="button small ghost" data-action="remove-connection" data-id="'+esc(link.id)+'">DISCONNECT</button>':
             '<button class="button small ghost" data-action="remove-connection" data-id="'+esc(link.id)+'">CLEAR DECLINED</button>';
-          return '<article class="panel connection-card"><div class="label">REGISTERED WORKSHOP</div><h2>'+esc(shop.shopName)+'</h2><div class="connection-meta"><span class="pill '+(st==='accepted'?'good':st==='pending'?'warn':'')+'">'+esc(st.toUpperCase())+'</span></div><div class="quick-actions">'+act+'</div></article>';
+          const location=[shop.city,shop.address].filter(Boolean).map(esc).join(' · ');
+          const services=(shop.services||[]).map(s=>'<span class="shop-service-tag">'+esc(s)+'</span>').join('');
+          return '<article class="panel connection-card shop-discovery-card"><div class="label">REGISTERED WORKSHOP // SELF-LISTED</div><h2>'+esc(shop.shopName)+'</h2>'+
+            (location?'<p class="shop-location">'+icon('mapPin')+' '+location+'</p>':'<p class="text-muted">Location not provided</p>')+
+            (shop.description?'<p class="shop-description">'+esc(shop.description)+'</p>':'')+
+            '<div class="shop-services">'+(services||'<span class="text-muted">Service categories not provided</span>')+'</div>'+
+            '<div class="connection-meta"><span class="pill '+(st==='accepted'?'good':st==='pending'?'warn':'')+'">'+esc(st.toUpperCase())+'</span></div><div class="quick-actions">'+act+'</div></article>';
         }).join('')+'</div>'+
-        (!(state.shops||[]).length?'<div class="panel empty-state"><h3>No registered workshops yet</h3><p>Workshops will appear after registration.</p></div>':'')+
-        '<p class="connection-note">Phase 4.1 links accounts only. Rider appointments and record sharing are future features.</p>';
+        (!shops.length?'<div class="panel empty-state"><h3>No workshops found</h3><p>Try removing filters, or ask a workshop to register and complete its public profile.</p></div>':'')+
+        '<p class="connection-note">Phase 4.2 provides directory search only. Distance estimates, directions, verified ratings, rider booking and record sharing are not yet supported.</p>';
     }
     const pending=links.filter(x=>x.status==='pending'),accepted=links.filter(x=>x.status==='accepted'),declined=links.filter(x=>x.status==='declined');
     const list=(items,mode)=>items.length?'<div class="connection-list">'+items.map(x=>
@@ -185,7 +204,19 @@
       (declined.length?'<section class="connection-section"><div class="panel-head"><div><h2>Declined Requests</h2></div></div>'+list(declined,'declined')+'</section>':'')+
       '<p class="connection-note">A connection does not expose rider maintenance history, create a customer record, or book appointments.</p>';
   }
-  function settingsPage(role){return `${head('SYSTEM // USER PREFERENCES','Settings','Manage your secure MotoKare account.')}<div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="label">USER PARAMETERS</div><h2>Profile Settings</h2></div></div><form data-form="settings"><div class="field"><label for="settings-name">Display name</label><input name="name" id="settings-name" value="${esc(state.session?.name||'')}" minlength="2" required></div><div class="field"><label for="settings-email">Email address</label><input name="email" id="settings-email" value="${esc(state.session?.email||'')}" type="email" required></div>${role==='shop'?`<div class="field"><label for="settings-shop">Workshop name</label><input name="shopName" id="settings-shop" value="${esc(state.settings.shopName)}" required></div>`:''}<button class="button primary" type="submit">${icon('check')} SAVE SETTINGS</button></form></section><section class="panel"><div class="panel-head"><div><div class="label">ACCOUNT SECURITY</div><h2>Change Password</h2></div></div><form data-form="password"><div class="field"><label for="pw-current">Current password</label><input id="pw-current" name="currentPassword" type="password" autocomplete="current-password" required></div><div class="field"><label for="pw-new">New password (10+ characters)</label><input id="pw-new" name="newPassword" type="password" autocomplete="new-password" minlength="10" required></div><button type="submit" class="button">${icon('shield')} CHANGE PASSWORD</button></form><div style="border-top:1px solid var(--line-soft);margin-top:25px;padding-top:20px"><span class="pill good">SERVER DATABASE CONNECTED</span><p style="color:#95BBCB;font-size:11px;margin-top:12px">Your account records are stored in PostgreSQL and protected by server-side permissions. Service reminders appear inside MotoKare; email/SMS delivery has not been configured.</p></div></section></div>`;}
+  function shopProfileSettings(){
+    const p=state.shopProfile||{city:'',address:'',description:'',services:[]};
+    const options=SHOP_SERVICES.map((s,i)=>'<label class="shop-service-option"><input type="checkbox" name="service_'+i+'" value="1" '+((p.services||[]).includes(s)?'checked':'')+'> '+esc(s)+'</label>').join('');
+    return '<section class="panel shop-public-profile"><div class="panel-head"><div><div class="label">WORKSHOP // PUBLIC DISCOVERY PROFILE</div><h2>Workshop Listing</h2></div></div>'+
+      '<p class="connection-note">These details will appear to signed-in MotoKare riders. Only provide a business location you want visible to them. Leave optional fields blank if preferred.</p>'+
+      '<form data-form="shop-profile"><div class="form-grid">'+
+      field('city','City / municipality (public, optional)','text',p.city||'','maxlength="80" placeholder="e.g. Davao City"')+
+      field('address','Business address (public, optional)','text',p.address||'','maxlength="160" placeholder="e.g. Shop location, street"')+'</div>'+
+      '<div class="field"><label for="shop-public-description">Description of your workshop (public, optional)</label><textarea id="shop-public-description" name="description" maxlength="500" rows="3" placeholder="Describe your services and specializations">'+esc(p.description||'')+'</textarea></div>'+
+      '<fieldset class="shop-service-fieldset"><legend>Services offered (select all that apply)</legend><div class="shop-service-options">'+options+'</div></fieldset>'+
+      '<button class="button primary" type="submit">'+icon('check')+' SAVE WORKSHOP LISTING</button></form></section>';
+  }
+  function settingsPage(role){return `${head('SYSTEM // USER PREFERENCES','Settings','Manage your secure MotoKare account.')}${role==='shop'?shopProfileSettings():''}<div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="label">USER PARAMETERS</div><h2>Profile Settings</h2></div></div><form data-form="settings"><div class="field"><label for="settings-name">Display name</label><input name="name" id="settings-name" value="${esc(state.session?.name||'')}" minlength="2" required></div><div class="field"><label for="settings-email">Email address</label><input name="email" id="settings-email" value="${esc(state.session?.email||'')}" type="email" required></div>${role==='shop'?`<div class="field"><label for="settings-shop">Workshop name</label><input name="shopName" id="settings-shop" value="${esc(state.settings.shopName)}" required></div>`:''}<button class="button primary" type="submit">${icon('check')} SAVE SETTINGS</button></form></section><section class="panel"><div class="panel-head"><div><div class="label">ACCOUNT SECURITY</div><h2>Change Password</h2></div></div><form data-form="password"><div class="field"><label for="pw-current">Current password</label><input id="pw-current" name="currentPassword" type="password" autocomplete="current-password" required></div><div class="field"><label for="pw-new">New password (10+ characters)</label><input id="pw-new" name="newPassword" type="password" autocomplete="new-password" minlength="10" required></div><button type="submit" class="button">${icon('shield')} CHANGE PASSWORD</button></form><div style="border-top:1px solid var(--line-soft);margin-top:25px;padding-top:20px"><span class="pill good">SERVER DATABASE CONNECTED</span><p style="color:#95BBCB;font-size:11px;margin-top:12px">Your account records are stored in PostgreSQL and protected by server-side permissions. Service reminders appear inside MotoKare; email/SMS delivery has not been configured.</p></div></section></div>`;}
   function notifications(){if(!notifyOpen)return '';const a=state.role==='shop'?[...state.appointments.filter(x=>x.status==='Pending').map(x=>`${esc(customerName(x.customerId))}: appointment awaiting confirmation.`),...state.connections.filter(x=>x.status==='pending').map(x=>`${esc(x.riderName)} requested a workshop connection.`)]:allAlerts().slice(0,6).map(x=>`${esc(x.c.name)}: ${x.label.toLowerCase()} (${remainingLabel(x.days)}).`);return `<aside class="notify-panel" role="dialog" aria-label="Notifications" aria-modal="false"><div class="label">SYSTEM NOTIFICATIONS</div><h3>Attention Queue</h3>${a.length?a.map(x=>`<p>${x}</p>`).join(''):'<div class="notification-empty">No alerts. Everything looks on track.</div>'}</aside>`;}
   function render(){route=routeNow();if(!loaded){app.innerHTML='<main class="container" style="padding:8rem 1rem"><div class="label">CONNECTING TO MOTOKARE SERVER...</div></main>';return;}if(route.startsWith('/rider/')||route.startsWith('/shop/')){if(!state.session){navigate('/login');return;}const role=parseAppRoute(route).role;if(role!==state.session.mode){navigate('/'+state.session.mode+'/dashboard');return;}}document.body.classList.remove('app-mode');let content;if(route==='/'||route==='/home')content=landing();else if(route==='/login'||route==='/register')content=authPage(route.slice(1));else{const {role,page}=parseAppRoute(route),valid=(role==='rider'?routesRider:routesShop).map(x=>x[0]);if(!valid.includes(page)){navigate('/');return;}const contentMap=role==='rider'?{dashboard:riderDash,motorcycles:motorcyclesPage,components:componentsPage,maintenance:maintenancePage,history:historyPage,connections:()=>connectionsPage('rider'),settings:()=>settingsPage('rider')}:{dashboard:shopDash,customers:customersPage,jobs:jobsPage,appointments:appointmentsPage,reports:reportsPage,connections:()=>connectionsPage('shop'),settings:()=>settingsPage('shop')};content=appShell(role,page,contentMap[page]());}
     app.innerHTML=content + notifications();document.title=`MotoKare | ${route==='/'?'Ride Smart. Maintain Better.':route==='/login'?'Log In':route==='/register'?'Register':breadcrumb(route.split('/').pop())}`;
@@ -219,6 +250,15 @@
       catch(error){toast(error.message);}return;
     }
     if(type==='settings'){await persist('/me','PATCH',{name:v.name,email:v.email,shopName:v.shopName},'Account settings updated.',{close:false});return;}
+    if(type==='shop-profile'){
+      const services=SHOP_SERVICES.filter((_,i)=>v['service_'+i]==='1');
+      await persist('/shops/profile','PATCH',{city:v.city||'',address:v.address||'',description:v.description||'',services},'Public workshop listing saved.',{close:false});return;
+    }
+    if(type==='search-shops'){
+      shopFilters={query:v.query||'',city:v.city||'',service:v.service||''};
+      try{shopResults=(await api(shopSearchUrl())).shops;render();}catch(error){toast(error.message);}
+      return;
+    }
     if(type==='password'){const ok=await persist('/me/password','PATCH',{currentPassword:v.currentPassword,newPassword:v.newPassword},'Password changed; other sessions signed out.',{close:false});if(ok)form.reset();return;}
     const bike=ensureBike();
     if(type==='add-bike'||type==='edit-bike'){
@@ -246,11 +286,12 @@
     if(a==='mobile-nav'){const n=$('#site-nav');n?.classList.toggle('open');el.setAttribute('aria-expanded',n?.classList.contains('open')?'true':'false');return;}
     if(a==='scroll'){e.preventDefault();if(routeNow()!=='/'){navigate('/');setTimeout(()=>$('#'+el.dataset.target)?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'}),20);}else{$('#site-nav')?.classList.remove('open');$('#'+el.dataset.target)?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});}return;}
     if(a==='auth-role'){state.role=el.dataset.role;render();return;}
-    if(a==='switch-role'){try{await api('/auth/logout','POST');state.session=null;state.role=el.dataset.role;mobileOpen=false;notifyOpen=false;navigate('/login');toast('Sign in with a '+(state.role==='shop'?'workshop':'rider')+' account to switch.');}catch(error){toast(error.message);}return;}
+    if(a==='switch-role'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;state.role=el.dataset.role;mobileOpen=false;notifyOpen=false;navigate('/login');toast('Sign in with a '+(state.role==='shop'?'workshop':'rider')+' account to switch.');}catch(error){toast(error.message);}return;}
     if(a==='notifications'){notifyOpen=!notifyOpen;render();return;}
-    if(a==='logout'){try{await api('/auth/logout','POST');state.session=null;mobileOpen=false;notifyOpen=false;navigate('/');toast('Signed out successfully.');}catch(error){toast(error.message);}return;}
+    if(a==='logout'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;mobileOpen=false;notifyOpen=false;navigate('/');toast('Signed out successfully.');}catch(error){toast(error.message);}return;}
     if(['add-bike','edit-bike','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment'].includes(a)){openModal(a,id);return;}
-    if(a==='connect-shop'){await persist('/connections','POST',{shopId:id},'Connection request sent. Await workshop approval.',{close:false});return;}
+    if(a==='reset-shop-search'){shopFilters={query:'',city:'',service:''};shopResults=null;render();return;}
+     if(a==='connect-shop'){await persist('/connections','POST',{shopId:id},'Connection request sent. Await workshop approval.',{close:false});return;}
      if(a==='approve-connection'||a==='decline-connection'){await persist('/connections/'+encodeURIComponent(id),'PATCH',{status:a==='approve-connection'?'accepted':'declined'},a==='approve-connection'?'Connection approved.':'Request declined.',{close:false});return;}
      if(a==='remove-connection'){
        if(!confirm('Remove this connection or request?'))return;
