@@ -63,9 +63,27 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  riderPage.location.hash='#/rider/connections';riderPage.listeners.hashchange();
  assert.match(riderPage.elements['#app'].innerHTML,/Repair Shops/);
  // Refresh as a second rider session to load the newly registered workshop directory.
+ const publish=await send(base,'/api/shops/profile','PATCH',{city:'Davao City',address:'Matina',description:'Oil changes and maintenance',services:['Oil Change','General Inspection']},shop.cookie);
+ assert.equal(publish.status,200);
  const riderDirectory=appSession(base,rider.cookie,'#/rider/connections');
  await wait(()=>riderDirectory.elements['#app'].innerHTML.includes('MotoKare Partner Garage'));
  assert.match(riderDirectory.elements['#app'].innerHTML,/REQUEST CONNECTION/);
+ assert.match(riderDirectory.elements['#app'].innerHTML,/Davao City/);
+ assert.match(riderDirectory.elements['#app'].innerHTML,/Oil Change/);
+ assert.match(riderDirectory.elements['#app'].innerHTML,/Search Workshops/);
+ riderDirectory.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ riderDirectory.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'search-shops'},values:{query:'no-match-workshop',city:'',service:''}})}});
+ await wait(()=>riderDirectory.elements['#app'].innerHTML.includes('No workshops found'));
+ riderDirectory.listeners.click({target:{closest:()=>({dataset:{action:'reset-shop-search'}})}});
+ assert.match(riderDirectory.elements['#app'].innerHTML,/MotoKare Partner Garage/);
+ riderDirectory.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'search-shops'},values:{query:'',city:'davao',service:'Oil Change'}})}});
+ await wait(()=>riderDirectory.elements['#app'].innerHTML.includes('1 RESULT'));
+ assert.match(riderDirectory.elements['#app'].innerHTML,/MotoKare Partner Garage/);
+ riderDirectory.listeners.click({target:{closest:()=>({dataset:{action:'reset-shop-search'}})}});
+
  const shopId=shop.data.user.id;
  riderDirectory.listeners.click({target:{closest:()=>({dataset:{action:'connect-shop',id:shopId}})}});
  await wait(()=>riderDirectory.elements['#app'].innerHTML.includes('CANCEL REQUEST'));
@@ -76,6 +94,18 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  shopPage.location.hash='#/shop/connections';shopPage.listeners.hashchange();
  assert.match(shopPage.elements['#app'].innerHTML,/Incoming Requests/);
  assert.match(shopPage.elements['#app'].innerHTML,/Rider Test/);
+ assert.match(shopPage.elements['#app'].innerHTML,/APPROVE/);
+ shopPage.location.hash='#/shop/settings';shopPage.listeners.hashchange();
+ assert.match(shopPage.elements['#app'].innerHTML,/Workshop Listing/);
+ assert.match(shopPage.elements['#app'].innerHTML,/Davao City/);
+ shopPage.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ shopPage.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'shop-profile'},values:{city:'Davao City',address:'Bajada',description:'Motorcycle servicing',service_0:'1'}})}});
+ await wait(()=>shopPage.elements['#app'].innerHTML.includes('Bajada'));
+ assert.equal((await send(base,'/api/shops?city=davao&service=Oil%20Change','GET',undefined,rider.cookie)).data.shops.length,1);
+ shopPage.location.hash='#/shop/connections';shopPage.listeners.hashchange();
  assert.match(shopPage.elements['#app'].innerHTML,/APPROVE/);
  const pending=(await send(base,'/api/connections','GET',undefined,shop.cookie)).data.connections;
  assert.equal(pending.length,1);

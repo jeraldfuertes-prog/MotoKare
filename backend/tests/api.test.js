@@ -34,6 +34,29 @@ test('full registration, CRUD, authorization, persistence and session flow',asyn
  assert.equal(a.status,201);const rider2=a.cookie;
  a=await call('POST','/api/auth/register',reg('shop','Shop Owner','shop@example.com','Moto Shop Davao'));
  assert.equal(a.status,201,JSON.stringify(a.data));const shop=a.cookie,shopId=a.data.user.id;
+ // Phase 4.2: public listings, shop-owned updates, scoped search, validation and privacy.
+ assert.equal((await call('PATCH','/api/shops/profile',{city:'Davao City',address:'Matina',description:'Oil and brake servicing',services:['Oil Change']},rider1)).status,403);
+ assert.equal((await call('PATCH','/api/shops/profile',{city:'Davao City',address:'Matina',description:'Test',services:'Oil Change'},shop)).status,400);
+ assert.equal((await call('PATCH','/api/shops/profile',{city:'Davao City',address:'Matina',description:'Test',services:['Oil Change','Oil Change']},shop)).status,400);
+ assert.equal((await call('PATCH','/api/shops/profile',{city:'Davao City',address:'Matina',description:'Test',services:['Counterfeit Service']},shop)).status,400);
+ assert.equal((await call('PATCH','/api/shops/profile',{city:'Davao City',address:'Matina',description:'x'.repeat(501),services:[]},shop)).status,400);
+ const profile=await call('PATCH','/api/shops/profile',{city:'Davao City',address:'Matina Street',description:'Oil and brake servicing',services:['Oil Change','Brake Service']},shop);
+ assert.equal(profile.status,200,JSON.stringify(profile.data));
+ assert.deepEqual(profile.data.shopProfile.services,['Oil Change','Brake Service']);
+ assert.equal((await call('GET','/api/bootstrap',undefined,shop)).data.shopProfile.city,'Davao City');
+ assert.equal((await call('GET','/api/bootstrap',undefined,rider1)).data.shopProfile,null);
+ assert.equal((await call('GET','/api/shops?city=davao&service=Oil%20Change',undefined,rider1)).data.shops.length,1);
+ assert.equal((await call('GET','/api/shops?city=cebu',undefined,rider1)).data.shops.length,0);
+ assert.equal((await call('GET','/api/shops?q=brake',undefined,rider1)).data.shops[0].id,shopId);
+ assert.equal((await call('GET','/api/shops?q=matina',undefined,rider1)).data.shops[0].city,'Davao City');
+ assert.equal((await call('GET','/api/shops?service=Engine%20Repair',undefined,rider1)).data.shops.length,0);
+ assert.equal((await call('GET','/api/shops?service=Invalid',undefined,rider1)).status,400);
+ assert.equal((await call('GET','/api/shops?city=a'.replace('city=a','city='+'a'.repeat(81)),undefined,rider1)).status,400);
+ const publicShops=(await call('GET','/api/shops',undefined,rider1)).data.shops;
+ assert.equal(publicShops[0].address,'Matina Street');
+ assert.deepEqual(publicShops[0].services,['Oil Change','Brake Service']);
+ assert.ok(!JSON.stringify(publicShops).includes('shop@example.com'));
+ assert.ok(!JSON.stringify(publicShops).includes('Shop Owner'));
  // Phase 4.1: opt-in account connection, authorization and lifecycle.
  let directory=await call('GET','/api/shops',undefined,rider1);
  assert.equal(directory.status,200);assert.equal(directory.data.shops.find(s=>s.id===shopId).shopName,'Moto Shop Davao');
