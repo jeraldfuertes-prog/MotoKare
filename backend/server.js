@@ -338,12 +338,14 @@ async function api(req,res,url){
    await transaction(async tx=>{
     // Serialize the shop's exact-time confirmations across rider and manual booking flows.
     await tx('SELECT id FROM users WHERE id=? AND role=? FOR UPDATE').get(user.id,'shop');
-    const request=await tx('SELECT status,date,time FROM rider_appointment_requests WHERE id=? AND shop_id=? FOR UPDATE').get(riderBooking[1],user.id);
+    const request=await tx('SELECT rider_id AS "riderId",status,date,time FROM rider_appointment_requests WHERE id=? AND shop_id=? FOR UPDATE').get(riderBooking[1],user.id);
     if(!request)fail(404,'Appointment request not found');
     if(!(request.status==='Pending'&&['Confirmed','Declined'].includes(to))&&
        !(request.status==='Confirmed'&&['Completed','Cancelled'].includes(to)))
       fail(409,'This appointment status cannot be changed to the requested status');
     if(to==='Confirmed'){
+     const connection=await tx('SELECT id FROM account_connections WHERE rider_id=? AND shop_id=? AND status=?').get(request.riderId,user.id,'accepted');
+     if(!connection)fail(409,'The rider is no longer connected to your workshop. Decline this request instead');
      if(request.date<today())fail(409,'The requested appointment date is already in the past');
      if(request.date===today()){
       const localTime=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
@@ -352,6 +354,11 @@ async function api(req,res,url){
      const busy=await tx('SELECT id FROM appointments WHERE user_id=? AND date=? AND time=? AND status=? LIMIT 1')
       .get(user.id,request.date,request.time,'Confirmed');
      if(busy)fail(409,'This time slot is already confirmed for a manually booked appointment');
+    }
+    if(to==='Completed'){
+     const nowLocal=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+     if(request.date>today()||(request.date===today()&&request.time>nowLocal))
+      fail(409,'This appointment cannot be marked completed before its scheduled time');
     }
     await tx('UPDATE rider_appointment_requests SET status=?,review_note=?,reviewed_at=NOW(),updated_at=NOW() WHERE id=? AND shop_id=?')
      .run(to,note,riderBooking[1],user.id);

@@ -81,7 +81,7 @@ test('Phase 4.3 rider booking requests require accepted connection and keep exis
  const notices=(await call('GET','/api/notifications',undefined,shop)).data.notifications;
  assert.ok(notices.some(x=>x.id===bookingId&&x.type==='rider-appointment'));
  assert.equal((await call('PATCH','/api/rider-appointments/'+bookingId,{status:'Cancelled'},other)).status,404);
- assert.equal((await call('PATCH','/api/rider-appointments/'+bookingId,{status:'Cancelled'},shop)).status,403);
+ assert.equal((await call('PATCH','/api/rider-appointments/'+bookingId,{status:'Cancelled'},shop)).status,409,'Workshops cannot cancel unreviewed pending requests; they must confirm or decline');
  assert.equal((await call('PATCH','/api/rider-appointments/'+bookingId,{status:'Confirmed'},rider)).status,400);
  const cancel=await call('PATCH','/api/rider-appointments/'+bookingId,{status:'Cancelled'},rider);
  assert.equal(cancel.status,200);assert.equal(cancel.data.status,'Cancelled');
