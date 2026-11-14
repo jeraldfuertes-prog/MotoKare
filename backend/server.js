@@ -347,6 +347,7 @@ async function api(req,res,url){
     if(!connection)fail(403,'An accepted rider connection is required for submitting a report');
     await tx('INSERT INTO shop_service_reports(id,appointment_id,rider_id,shop_id,bike_id,bike_model,service,service_date,cost,notes) VALUES(?,?,?,?,?,?,?,?,?,?)')
      .run(id,appointmentId,booking.riderId,user.id,booking.bikeId,booking.bikeModel,service,serviceDate,cost,notes);
+    await notify(booking.riderId,'service-report',`${user.shopName} submitted a service report for ${booking.bikeModel}`,'/rider/records',tx);
    });
   }catch(err){if(err.code==='23505')fail(409,'A service report has already been submitted for this booking');throw err;}
   return send(res,201,{id,status:'Pending'});
@@ -390,6 +391,7 @@ async function api(req,res,url){
    }
    await tx('UPDATE shop_service_reports SET status=?,imported_service_id=?,reviewed_at=NOW() WHERE id=? AND rider_id=?')
     .run(decision,importedServiceId,reportPath[1],user.id);
+   await notify(report.shopId,'report-decision',`${user.name} ${decision.toLowerCase()} your submitted service report`,'/shop/records',tx);
   });
   return send(res,200,{ok:true,status:decision,importedServiceId});
  }
@@ -407,6 +409,7 @@ async function api(req,res,url){
     const record=await tx('SELECT id FROM services WHERE id=? AND user_id=? FOR SHARE').get(serviceId,user.id);
     if(!record)fail(404,'Service record not found');
     await tx('INSERT INTO rider_service_shares(id,rider_id,shop_id,service_id) VALUES(?,?,?,?)').run(id,user.id,shopId,serviceId);
+    await notify(shopId,'service-shared',`${user.name} shared an individual maintenance record with your workshop`,'/shop/records',tx);
    });
   }catch(err){if(err.code==='23505')fail(409,'This service record has already been shared with the workshop');throw err;}
   return send(res,201,{id});
@@ -414,8 +417,11 @@ async function api(req,res,url){
  const sharePath=path.match(/^\/api\/service-shares\/([^/]+)$/);
  if(sharePath&&method==='DELETE'){
   await requireUser(req,'rider');
-  const removed=await stmt('DELETE FROM rider_service_shares WHERE id=? AND rider_id=? RETURNING id').get(sharePath[1],user.id);
-  if(!removed)fail(404,'Service share not found');
+  await transaction(async tx=>{
+   const removed=await tx('DELETE FROM rider_service_shares WHERE id=? AND rider_id=? RETURNING shop_id AS "shopId"').get(sharePath[1],user.id);
+   if(!removed)fail(404,'Service share not found');
+   await notify(removed.shopId,'share-revoked','A rider revoked access to a previously shared service record','/shop/records',tx);
+  });
   return send(res,200,{ok:true});
  }
  if(path==='/api/rider-appointments'&&method==='GET'){
