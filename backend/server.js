@@ -319,16 +319,48 @@ async function api(req,res,url){
  }
  const riderBooking=path.match(/^\/api\/rider-appointments\/([^/]+)$/);
  if(riderBooking&&method==='PATCH'){
-  await requireUser(req,'rider');const b=await body(req);
-  if(b.status!=='Cancelled')fail(400,'Riders can only cancel pending appointments');
-  const row=await stmt('UPDATE rider_appointment_requests SET status=?,updated_at=NOW() WHERE id=? AND rider_id=? AND status=? RETURNING id')
-   .get('Cancelled',riderBooking[1],user.id,'Pending');
-  if(!row){
-   const existing=await stmt('SELECT status FROM rider_appointment_requests WHERE id=? AND rider_id=?').get(riderBooking[1],user.id);
-   if(!existing)fail(404,'Appointment request not found');
-   fail(409,'Only pending appointment requests can be cancelled');
+  const b=await body(req);
+  if(user.role==='rider'){
+   if(b.status!=='Cancelled')fail(400,'Riders may only cancel their own appointments');
+   const row=await stmt('UPDATE rider_appointment_requests SET status=?,updated_at=NOW() WHERE id=? AND rider_id=? AND status IN (?,?) RETURNING id')
+    .get('Cancelled',riderBooking[1],user.id,'Pending','Confirmed');
+   if(!row){
+    const existing=await stmt('SELECT status FROM rider_appointment_requests WHERE id=? AND rider_id=?').get(riderBooking[1],user.id);
+    if(!existing)fail(404,'Appointment request not found');
+    fail(409,'Only pending or confirmed appointments can be cancelled');
+   }
+   return send(res,200,{ok:true,status:'Cancelled'});
   }
-  return send(res,200,{ok:true,status:'Cancelled'});
+  await requireUser(req,'shop');
+  const to=status(b.status,['Confirmed','Declined','Completed','Cancelled']);
+  const note=text(b.reviewNote??'','Workshop response',250,{min:0});
+  try{
+   await transaction(async tx=>{
+    // Serialize the shop's exact-time confirmations across rider and manual booking flows.
+    await tx('SELECT id FROM users WHERE id=? AND role=? FOR UPDATE').get(user.id,'shop');
+    const request=await tx('SELECT status,date,time FROM rider_appointment_requests WHERE id=? AND shop_id=? FOR UPDATE').get(riderBooking[1],user.id);
+    if(!request)fail(404,'Appointment request not found');
+    if(!(request.status==='Pending'&&['Confirmed','Declined'].includes(to))&&
+       !(request.status==='Confirmed'&&['Completed','Cancelled'].includes(to)))
+      fail(409,'This appointment status cannot be changed to the requested status');
+    if(to==='Confirmed'){
+     if(request.date<today())fail(409,'The requested appointment date is already in the past');
+     if(request.date===today()){
+      const localTime=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+      if(request.time<=localTime)fail(409,'The requested appointment time has already passed');
+     }
+     const busy=await tx('SELECT id FROM appointments WHERE user_id=? AND date=? AND time=? AND status=? LIMIT 1')
+      .get(user.id,request.date,request.time,'Confirmed');
+     if(busy)fail(409,'This time slot is already confirmed for a manually booked appointment');
+    }
+    await tx('UPDATE rider_appointment_requests SET status=?,review_note=?,reviewed_at=NOW(),updated_at=NOW() WHERE id=? AND shop_id=?')
+     .run(to,note,riderBooking[1],user.id);
+   });
+  }catch(err){
+   if(err.code==='23505')fail(409,'This time slot is already confirmed for another rider. Decline this request or ask the rider to choose a different time');
+   throw err;
+  }
+  return send(res,200,{ok:true,status:to});
  }
  if(path==='/api/appointments'&&method==='GET'){await requireUser(req,'shop');return send(res,200,{appointments:await appointmentRows(user.id)});}
  if(path==='/api/appointments'&&method==='POST'){
@@ -338,11 +370,28 @@ async function api(req,res,url){
  m=path.match(/^\/api\/appointments\/([^/]+)$/);
  if(m){await requireUser(req,'shop');await requireOwn('appointments',m[1],user);
   if(method==='PATCH'){
-   const b=await body(req),old=await stmt('SELECT customer_id AS "customerId",service,date,time,status FROM appointments WHERE id=? AND user_id=?').get(m[1],user.id);
-   const to=status(b.status??old.status,['Pending','Confirmed','Completed','Cancelled']);
-   const customerId=await requireCustomer(b.customerId??old.customerId,user);
-   const d=date(b.date??old.date);if(b.date&&d<today())fail(400,'Choose today or a future appointment date');
-   await stmt('UPDATE appointments SET customer_id=?,service=?,date=?,time=?,status=? WHERE id=? AND user_id=?').run(customerId,text(b.service??old.service,'Service',100),d,time(b.time??old.time),to,m[1],user.id);
+   const b=await body(req);
+   await transaction(async tx=>{
+    await tx('SELECT id FROM users WHERE id=? AND role=? FOR UPDATE').get(user.id,'shop');
+    const old=await tx('SELECT customer_id AS "customerId",service,date,time,status FROM appointments WHERE id=? AND user_id=? FOR UPDATE').get(m[1],user.id);
+    if(!old)fail(404,'Record not found');
+    const to=status(b.status??old.status,['Pending','Confirmed','Completed','Cancelled']);
+    const customerId=b.customerId??old.customerId;
+    const ownsCustomer=await tx('SELECT id FROM customers WHERE id=? AND user_id=?').get(customerId,user.id);
+    if(!ownsCustomer)fail(404,'Record not found');
+    const d=date(b.date??old.date),t=time(b.time??old.time);
+    if(b.date&&d<today())fail(400,'Choose today or a future appointment date');
+    if(to==='Confirmed'){
+     const competingRider=await tx('SELECT id FROM rider_appointment_requests WHERE shop_id=? AND date=? AND time=? AND status=? LIMIT 1')
+      .get(user.id,d,t,'Confirmed');
+     if(competingRider)fail(409,'This time slot is already confirmed for a rider appointment');
+     const competingManual=await tx('SELECT id FROM appointments WHERE user_id=? AND date=? AND time=? AND status=? AND id<>? LIMIT 1')
+      .get(user.id,d,t,'Confirmed',m[1]);
+     if(competingManual)fail(409,'This time slot is already confirmed for another manual appointment');
+    }
+    await tx('UPDATE appointments SET customer_id=?,service=?,date=?,time=?,status=? WHERE id=? AND user_id=?')
+     .run(customerId,text(b.service??old.service,'Service',100),d,t,to,m[1],user.id);
+   });
    return send(res,200,{ok:true});
   }
   if(method==='DELETE'){await stmt('DELETE FROM appointments WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}

@@ -150,3 +150,10 @@ CREATE INDEX IF NOT EXISTS rider_requests_rider ON rider_appointment_requests(ri
 CREATE INDEX IF NOT EXISTS rider_requests_shop ON rider_appointment_requests(shop_id,status,date,time);
 -- Idempotent double-submit protection (not a claim of workshop availability).
 CREATE UNIQUE INDEX IF NOT EXISTS rider_requests_unique_active_slot ON rider_appointment_requests(rider_id,shop_id,date,time) WHERE status IN ('Pending','Confirmed');
+
+-- Phase 4.4: shop-reviewed rider appointment requests (additive and reversible).
+ALTER TABLE rider_appointment_requests ADD COLUMN IF NOT EXISTS review_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE rider_appointment_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+-- Prevent two riders receiving a confirmation for the same workshop/time.
+-- Other statuses are intentionally unrestricted, including Pending requests.
+CREATE UNIQUE INDEX IF NOT EXISTS rider_requests_unique_confirmed_slot ON rider_appointment_requests(shop_id,date,time) WHERE status='Confirmed';
