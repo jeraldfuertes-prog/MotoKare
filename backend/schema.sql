@@ -157,3 +157,34 @@ ALTER TABLE rider_appointment_requests ADD COLUMN IF NOT EXISTS reviewed_at TIME
 -- Prevent two riders receiving a confirmation for the same workshop/time.
 -- Other statuses are intentionally unrestricted, including Pending requests.
 CREATE UNIQUE INDEX IF NOT EXISTS rider_requests_unique_confirmed_slot ON rider_appointment_requests(shop_id,date,time) WHERE status='Confirmed';
+
+-- Phase 4.5: workshop-created service reports are explicitly accepted or declined by riders.
+-- Acceptance creates a rider-owned history entry; no existing services are shared automatically.
+CREATE TABLE IF NOT EXISTS shop_service_reports (
+ id TEXT PRIMARY KEY,
+ appointment_id TEXT NOT NULL UNIQUE REFERENCES rider_appointment_requests(id) ON DELETE CASCADE,
+ rider_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ shop_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ bike_id TEXT REFERENCES bikes(id) ON DELETE SET NULL,
+ bike_model TEXT NOT NULL,
+ service TEXT NOT NULL,
+ service_date TEXT NOT NULL,
+ cost DOUBLE PRECISION NOT NULL CHECK (cost>=0),
+ notes TEXT NOT NULL DEFAULT '',
+ status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Accepted','Declined')),
+ imported_service_id TEXT UNIQUE REFERENCES services(id) ON DELETE SET NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ reviewed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS shop_service_reports_rider ON shop_service_reports(rider_id,status,created_at);
+CREATE INDEX IF NOT EXISTS shop_service_reports_shop ON shop_service_reports(shop_id,created_at);
+-- Riders share individual history entries only with workshops whose connection is accepted.
+CREATE TABLE IF NOT EXISTS rider_service_shares (
+ id TEXT PRIMARY KEY,
+ rider_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ shop_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ UNIQUE(rider_id,shop_id,service_id)
+);
+CREATE INDEX IF NOT EXISTS rider_service_shares_shop ON rider_service_shares(shop_id,created_at);

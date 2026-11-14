@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, randomBytes, scrypt: scryptCallback, timingSafeEqual, createHash } = require('node:crypto');
 const { promisify } = require('node:util');
-const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows } = require('./db');
+const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows, serviceReportRows, serviceShareRows } = require('./db');
 const scrypt=promisify(scryptCallback);
 const PORT=Number(process.env.PORT||3000);
 const HOST=process.env.HOST||'127.0.0.1';
@@ -120,8 +120,13 @@ async function api(req,res,url){
  }
  if(link&&method==='DELETE'){
   const ownership=user.role==='rider'?'rider_id':'shop_id';
-  const deleted=await stmt('DELETE FROM account_connections WHERE id=? AND '+ownership+'=? RETURNING id').get(link[1],user.id);
-  if(!deleted)fail(404,'Connection not found');
+  await transaction(async tx=>{
+   const conn=await tx('SELECT rider_id AS "riderId",shop_id AS "shopId" FROM account_connections WHERE id=? AND '+ownership+'=? FOR UPDATE').get(link[1],user.id);
+   if(!conn)fail(404,'Connection not found');
+   // Revocation is permanent for shared individual records, even if the accounts reconnect later.
+   await tx('DELETE FROM rider_service_shares WHERE rider_id=? AND shop_id=?').run(conn.riderId,conn.shopId);
+   await tx('DELETE FROM account_connections WHERE id=? AND '+ownership+'=?').run(link[1],user.id);
+  });
   return send(res,200,{ok:true});
  }
  if(path==='/api/bikes'&&method==='GET'){await requireUser(req,'rider');return send(res,200,{bikes:await bikeRows(user.id)});}
@@ -289,6 +294,100 @@ async function api(req,res,url){
   if(method==='DELETE'){await stmt('DELETE FROM jobs WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}
  }
  // Phase 4.3: rider appointment requests, separated from shop-owned manual appointments.
+ // Phase 4.5: minimal, opt-in service sharing. Completion never automatically imports records.
+ if(path==='/api/service-reports'&&method==='GET'){
+  return send(res,200,{reports:await serviceReportRows(user)});
+ }
+ if(path==='/api/service-reports'&&method==='POST'){
+  await requireUser(req,'shop');const b=await body(req);
+  const appointmentId=text(b.appointmentId,'Completed booking ID',64),
+   service=text(b.service,'Work performed',100,{min:2}),serviceDate=date(b.serviceDate,'Service date'),
+   cost=money(b.cost,'Service cost'),notes=text(b.notes??'','Work details',500,{min:0});
+  if(serviceDate>today())fail(400,'Service completion date cannot be in the future');
+  const id=randomUUID();
+  try{
+   await transaction(async tx=>{
+    const booking=await tx('SELECT rider_id AS "riderId",bike_id AS "bikeId",bike_model AS "bikeModel",date,status FROM rider_appointment_requests WHERE id=? AND shop_id=? FOR UPDATE')
+     .get(appointmentId,user.id);
+    if(!booking)fail(404,'Booking not found');
+    if(booking.status!=='Completed')fail(409,'Only completed rider bookings can have service reports');
+    if(!booking.bikeId)fail(409,'The motorcycle no longer exists; cannot create a linked report');
+    if(serviceDate<booking.date)fail(400,'Service date cannot precede the booked appointment');
+    const connection=await tx('SELECT id FROM account_connections WHERE rider_id=? AND shop_id=? AND status=? FOR SHARE').get(booking.riderId,user.id,'accepted');
+    if(!connection)fail(403,'An accepted rider connection is required for submitting a report');
+    await tx('INSERT INTO shop_service_reports(id,appointment_id,rider_id,shop_id,bike_id,bike_model,service,service_date,cost,notes) VALUES(?,?,?,?,?,?,?,?,?,?)')
+     .run(id,appointmentId,booking.riderId,user.id,booking.bikeId,booking.bikeModel,service,serviceDate,cost,notes);
+   });
+  }catch(err){if(err.code==='23505')fail(409,'A service report has already been submitted for this booking');throw err;}
+  return send(res,201,{id,status:'Pending'});
+ }
+ const reportPath=path.match(/^\/api\/service-reports\/([^/]+)$/);
+ if(reportPath&&method==='PATCH'){
+  await requireUser(req,'rider');const b=await body(req);
+  const decision=status(b.decision,['Accepted','Declined']);
+  const componentId=b.componentId===undefined||b.componentId===null||b.componentId===''?null:text(b.componentId,'Component ID',64);
+  if(decision==='Declined'&&componentId)fail(400,'Do not specify a component when declining');
+  let importedServiceId=null;
+  await transaction(async tx=>{
+   const report=await tx('SELECT id,shop_id AS "shopId",bike_id AS "bikeId",service,service_date AS "serviceDate",cost,notes,status FROM shop_service_reports WHERE id=? AND rider_id=? FOR UPDATE')
+    .get(reportPath[1],user.id);
+   if(!report)fail(404,'Service report not found');
+   if(report.status!=='Pending')fail(409,'This service report was already reviewed');
+   if(decision==='Accepted'){
+    const connection=await tx('SELECT id FROM account_connections WHERE rider_id=? AND shop_id=? AND status=? FOR SHARE')
+     .get(user.id,report.shopId,'accepted');
+    if(!connection)fail(409,'Reconnect to this workshop before importing a report');
+    if(!report.bikeId)fail(409,'The linked motorcycle has been removed');
+    const bike=await tx('SELECT odometer FROM bikes WHERE id=? AND user_id=? FOR UPDATE').get(report.bikeId,user.id);
+    if(!bike)fail(409,'The linked motorcycle has been removed');
+    if(report.serviceDate>today())fail(409,'Future service dates cannot be imported');
+    let component=null;
+    if(componentId){
+     component=await tx('SELECT id,name,interval,interval_days,last_service_date FROM components WHERE id=? AND bike_id=? AND user_id=? AND archived_at IS NULL FOR UPDATE')
+      .get(componentId,report.bikeId,user.id);
+     if(!component)fail(404,'Selected active component not found for this motorcycle');
+    }
+    const shop=await tx('SELECT shop_name AS "shopName" FROM users WHERE id=? AND role=?').get(report.shopId,'shop');
+    if(!shop)fail(404,'Workshop no longer exists');
+    importedServiceId=randomUUID();
+    await tx('INSERT INTO services(id,user_id,bike_id,component_id,type,date,mileage,cost,shop,notes) VALUES(?,?,?,?,?,?,?,?,?,?)')
+     .run(importedServiceId,user.id,report.bikeId,component?.id||null,report.service,report.serviceDate,bike.odometer,report.cost,shop.shopName,report.notes);
+    // Calendar dates are updated only when the rider deliberately selected a component.
+    if(component&&(!component.last_service_date||report.serviceDate>=component.last_service_date)){
+     await tx('UPDATE components SET last_km=?,next_km=?,last_service_date=?,due_date=? WHERE id=? AND user_id=?')
+      .run(bike.odometer,bike.odometer+component.interval,report.serviceDate,later(component.interval_days,report.serviceDate),component.id,user.id);
+    }
+   }
+   await tx('UPDATE shop_service_reports SET status=?,imported_service_id=?,reviewed_at=NOW() WHERE id=? AND rider_id=?')
+    .run(decision,importedServiceId,reportPath[1],user.id);
+  });
+  return send(res,200,{ok:true,status:decision,importedServiceId});
+ }
+ if(path==='/api/service-shares'&&method==='GET'){
+  return send(res,200,{shares:await serviceShareRows(user)});
+ }
+ if(path==='/api/service-shares'&&method==='POST'){
+  await requireUser(req,'rider');const b=await body(req);
+  const serviceId=text(b.serviceId,'Service record ID',64),shopId=text(b.shopId,'Workshop ID',64),id=randomUUID();
+  try{
+   await transaction(async tx=>{
+    const link=await tx('SELECT id FROM account_connections WHERE rider_id=? AND shop_id=? AND status=? FOR SHARE')
+     .get(user.id,shopId,'accepted');
+    if(!link)fail(403,'Connect with this workshop before sharing a service record');
+    const record=await tx('SELECT id FROM services WHERE id=? AND user_id=? FOR SHARE').get(serviceId,user.id);
+    if(!record)fail(404,'Service record not found');
+    await tx('INSERT INTO rider_service_shares(id,rider_id,shop_id,service_id) VALUES(?,?,?,?)').run(id,user.id,shopId,serviceId);
+   });
+  }catch(err){if(err.code==='23505')fail(409,'This service record has already been shared with the workshop');throw err;}
+  return send(res,201,{id});
+ }
+ const sharePath=path.match(/^\/api\/service-shares\/([^/]+)$/);
+ if(sharePath&&method==='DELETE'){
+  await requireUser(req,'rider');
+  const removed=await stmt('DELETE FROM rider_service_shares WHERE id=? AND rider_id=? RETURNING id').get(sharePath[1],user.id);
+  if(!removed)fail(404,'Service share not found');
+  return send(res,200,{ok:true});
+ }
  if(path==='/api/rider-appointments'&&method==='GET'){
   return send(res,200,{appointments:await riderAppointmentRows(user)});
  }
@@ -406,7 +505,8 @@ async function api(req,res,url){
  if(path==='/api/notifications'&&method==='GET'){
   if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');const requests=(await connectionRows(user)).filter(x=>x.status==='pending');const riderRequests=(await riderAppointmentRows(user)).filter(x=>x.status==='Pending');return send(res,200,{notifications:[...pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date})),...requests.map(x=>({id:x.id,type:'connection',message:`${x.riderName} requested to connect with your workshop`})),...riderRequests.map(x=>({id:x.id,type:'rider-appointment',message:`${x.riderName} requested ${x.service} on ${x.date} at ${x.time}`,date:x.date}))]});}
   const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id&&!c.archived)){const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);if(days<=14)items.push({id:c.id,bikeId:b.id,type:days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingDays:days,dueDate:c.dueDate});}
-  return send(res,200,{notifications:items});
+  const reports=(await serviceReportRows(user)).filter(r=>r.status==='Pending');
+  return send(res,200,{notifications:[...items,...reports.map(r=>({id:r.id,type:'service-report',message:`${r.shopName} submitted a service report for ${r.bikeModel}`,serviceDate:r.serviceDate}))]});
  }
  if(path==='/api/reports'&&method==='GET'){
   if(user.role==='shop'){const jobs=await jobRows(user.id),done=jobs.filter(j=>j.status==='Completed'),value=done.reduce((sum,j)=>sum+j.cost,0);return send(res,200,{role:'shop',customers:(await customerRows(user.id)).length,totalJobs:jobs.length,completedJobs:done.length,openJobs:jobs.length-done.length,appointments:(await appointmentRows(user.id)).length,completedJobValue:value});}

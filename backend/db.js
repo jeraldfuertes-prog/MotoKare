@@ -70,9 +70,12 @@ const shopRows = ({query='',city='',service=''}={}) => stmt(`SELECT id,shop_name
 const shopProfile = id => stmt('SELECT shop_city AS city,shop_address AS address,shop_description AS description,services_offered AS services FROM users WHERE id=? AND role=?').get(id,'shop');
 // Only account names and status are exposed. No email, bikes, services or customer records.
 const connectionRows = user => stmt('SELECT c.id,c.rider_id AS "riderId",c.shop_id AS "shopId",c.status,c.created_at AS "createdAt",s.shop_name AS "shopName",r.name AS "riderName" FROM account_connections c JOIN users s ON s.id=c.shop_id AND s.role=? JOIN users r ON r.id=c.rider_id AND r.role=? WHERE '+(user.role==='rider'?'c.rider_id=?':'c.shop_id=?')+' ORDER BY c.created_at DESC,c.id DESC').all('shop','rider',user.id);
+// These queries expose only the specific submitted report or explicitly shared service entry.
+const serviceReportRows = user => stmt('SELECT sr.id,sr.appointment_id AS "appointmentId",sr.rider_id AS "riderId",sr.shop_id AS "shopId",sr.bike_id AS "bikeId",sr.bike_model AS "bikeModel",sr.service,sr.service_date AS "serviceDate",sr.cost,sr.notes,sr.status,sr.imported_service_id AS "importedServiceId",sr.created_at AS "createdAt",sr.reviewed_at AS "reviewedAt",u.name AS "riderName",sp.shop_name AS "shopName" FROM shop_service_reports sr JOIN users u ON u.id=sr.rider_id JOIN users sp ON sp.id=sr.shop_id WHERE '+(user.role==='rider'?'sr.rider_id=?':'sr.shop_id=?')+' ORDER BY sr.created_at DESC LIMIT 300').all(user.id);
+const serviceShareRows = user => stmt('SELECT sh.id,sh.rider_id AS "riderId",sh.shop_id AS "shopId",sh.service_id AS "serviceId",sh.created_at AS "createdAt",sv.type,sv.date,sv.cost,sv.shop,sv.notes,b.model AS "bikeModel",r.name AS "riderName",sp.shop_name AS "shopName" FROM rider_service_shares sh JOIN services sv ON sv.id=sh.service_id AND sv.user_id=sh.rider_id JOIN bikes b ON b.id=sv.bike_id JOIN users r ON r.id=sh.rider_id JOIN users sp ON sp.id=sh.shop_id JOIN account_connections c ON c.rider_id=sh.rider_id AND c.shop_id=sh.shop_id AND c.status=? WHERE '+(user.role==='rider'?'sh.rider_id=?':'sh.shop_id=?')+' ORDER BY sh.created_at DESC LIMIT 300').all('accepted',user.id);
 async function bootstrap(user) {
   const rider = user.role === 'rider';
-  const [bikes, components, services, customers, jobs, appointments, shops, connections, profile, riderAppointments] = await Promise.all([
+  const [bikes, components, services, customers, jobs, appointments, shops, connections, profile, riderAppointments, serviceReports, serviceShares] = await Promise.all([
     rider ? bikeRows(user.id) : [],
     rider ? componentRows(user.id) : [],
     rider ? serviceRows(user.id) : [],
@@ -83,12 +86,14 @@ async function bootstrap(user) {
     connectionRows(user),
     rider ? null : shopProfile(user.id),
     riderAppointmentRows(user),
+    serviceReportRows(user),
+    serviceShareRows(user),
   ]);
   return {
     version: 4, role: user.role, selectedBike: null,
     session: { name: user.name, email: user.email, mode: user.role },
-    bikes, components, services, customers, jobs, appointments, shops, connections, shopProfile:profile, riderAppointments,
+    bikes, components, services, customers, jobs, appointments, shops, connections, shopProfile:profile, riderAppointments, serviceReports, serviceShares,
     settings: { shopName: user.shopName || '', notifications: true, distance: 'km' },
   };
 }
-module.exports = { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows };
+module.exports = { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows, serviceReportRows, serviceShareRows };
