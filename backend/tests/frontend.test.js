@@ -326,7 +326,21 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  const deepLink=appSession(base,'','#/features');
  await wait(()=>deepLink.elements['#app'].innerHTML.includes('ENGINEERED FOR'));
  assert.match(deepLink.elements['#app'].innerHTML,/id="features"/,'Direct navigation to Features must render homepage sections');
+ // Homepage role cards must remain informational, without direct-dashboard preview links.
+ assert.match(landing.elements['#app'].innerHTML,/MAINTAIN/);
+ assert.match(landing.elements['#app'].innerHTML,/WITH CONFIDENCE/);
+ assert.match(landing.elements['#app'].innerHTML,/MANAGE/);
+ assert.match(landing.elements['#app'].innerHTML,/EVERY SERVICE/);
+ assert.doesNotMatch(landing.elements['#app'].innerHTML,/PREVIEW RIDER SYSTEM/);
+ assert.doesNotMatch(landing.elements['#app'].innerHTML,/PREVIEW SHOP SYSTEM/);
+ assert.doesNotMatch(landing.elements['#app'].innerHTML,/href="#\/rider\/dashboard"/);
+ assert.doesNotMatch(landing.elements['#app'].innerHTML,/href="#\/shop\/dashboard"/);
  const anonymous=appSession(base,'','#/rider/dashboard');
  await wait(()=>anonymous.location.hash==='#/login');
  assert.match(anonymous.elements['#app'].innerHTML,/System Login/);
+ const anonymousShop=appSession(base,'','#/shop/dashboard');
+ await wait(()=>anonymousShop.location.hash==='#/login');
+ assert.match(anonymousShop.elements['#app'].innerHTML,/System Login/);
+ assert.equal((await send(base,'/api/bootstrap','GET',undefined,'')).status,401,'Anonymous API access must remain blocked');
+ assert.equal((await send(base,'/api/auth/me','GET',undefined,'')).status,401,'Anonymous session lookup must remain blocked');
 });
