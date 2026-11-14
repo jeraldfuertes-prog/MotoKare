@@ -83,3 +83,9 @@ a{color:inherit;text-decoration:none} button,input,select,textarea{font:inherit}
 .booking-item-actions{display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0}
 .booking-item-actions .button{white-space:nowrap}
 @media(max-width:620px){.booking-item{align-items:flex-start;flex-direction:column;gap:12px}.booking-item-actions{flex-direction:row;align-items:center;flex-wrap:wrap;width:100%}}
+
+/* Phase 4.4: appointment decision dashboard and visible workshop responses. */
+.booking-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:17px 0}
+.booking-review-note{color:#B6EDE6!important;border-left:2px solid var(--cyan);padding-left:10px;margin-top:9px;overflow-wrap:anywhere;white-space:pre-line}
+@media(max-width:700px){.booking-kpis{grid-template-columns:1fr 1fr}}
+@media(max-width:440px){.booking-kpis{grid-template-columns:1fr}}

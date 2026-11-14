@@ -196,32 +196,41 @@
     const connected=(state.connections||[]).filter(x=>x.status==='accepted');
     const bookings=state.riderAppointments||[];
     const canBook=connected.length>0&&state.bikes.length>0;
-    return head('RIDER // SERVICE REQUESTS','My Bookings','Request a service visit with a connected MotoKare workshop. Requests are not confirmed bookings.',
+    return head('RIDER // SERVICE REQUESTS','My Bookings','Request appointments, check workshop decisions, and manage your bookings.',
       canBook?button('request-appointment','REQUEST APPOINTMENT','calendar'):'')+
-      '<div class="alert-strip">'+icon('info')+' Requests remain PENDING until the workshop reviews them. Sending a request does not reserve a time slot. Workshop approval is planned for Phase 4.4.</div>'+
+      '<div class="alert-strip">'+icon('info')+' Requests start as PENDING. A workshop may CONFIRM or DECLINE each request. Times are not reserved until confirmation.</div>'+
       (!connected.length?'<div class="panel empty-state"><h3>Connect to a workshop first</h3><p>Open Repair Shops and request a connection. The workshop must approve it before you can request an appointment.</p><a class="button primary" href="#/rider/connections">FIND REPAIR SHOPS</a></div>':'')+
       (!state.bikes.length?'<div class="panel empty-state"><h3>Add a motorcycle first</h3><p>Choose the motorcycle that will receive the requested service.</p><a class="button primary" href="#/rider/motorcycles">MY MOTORCYCLES</a></div>':'')+
       '<section class="panel appointment-requests"><div class="panel-head"><div><div class="label">RIDER APPOINTMENT REQUESTS // '+bookings.length+' TOTAL</div><h2>Request History</h2></div></div>'+
       (bookings.length?'<div class="booking-list">'+bookings.map(b=>
         '<article class="booking-item"><div class="booking-item-main"><span class="label">'+esc(b.shopName)+'</span><h3>'+esc(b.service)+'</h3><p>'+esc(b.bikeModel)+' · '+niceDate(b.date)+' · '+esc(b.time)+' (Philippine time)</p>'+
-        (b.notes?'<p class="text-muted">Note: '+esc(b.notes)+'</p>':'')+'</div>'+
+        (b.notes?'<p class="text-muted">Your note: '+esc(b.notes)+'</p>':'')+(b.reviewNote?'<p class="booking-review-note">Workshop response: '+esc(b.reviewNote)+'</p>':'')+'</div>'+
         '<div class="booking-item-actions"><span class="pill '+(b.status==='Cancelled'||b.status==='Declined'?'danger':b.status==='Confirmed'||b.status==='Completed'?'good':'warn')+'">'+esc(b.status)+'</span>'+
-        (b.status==='Pending'?'<button type="button" class="button small ghost" data-action="cancel-rider-appointment" data-id="'+esc(b.id)+'">CANCEL REQUEST</button>':'')+'</div></article>'
+        (['Pending','Confirmed'].includes(b.status)?'<button type="button" class="button small ghost" data-action="cancel-rider-appointment" data-id="'+esc(b.id)+'">'+(b.status==='Confirmed'?'CANCEL BOOKING':'CANCEL REQUEST')+'</button>':'')+'</div></article>'
       ).join('')+'</div>':'<div class="empty-state"><h3>No requests yet</h3><p>Request an appointment from a workshop after your connection is approved.</p></div>')+'</section>';
   }
   function riderRequestsForShop(){
     const all=state.riderAppointments||[];
-    const pending=all.filter(x=>x.status==='Pending');
-    return '<section class="panel rider-request-panel"><div class="panel-head"><div><div class="label">PHASE 4.3 // REQUESTS FROM CONNECTED RIDERS</div><h2>Incoming Rider Requests ('+pending.length+' pending)</h2></div></div>'+
-      '<p class="text-muted">These are rider-submitted requests, separate from manually booked shop customers. Acceptance and rejection controls are planned for Phase 4.4.</p>'+
-      (all.length?'<div class="booking-list">'+all.map(b=>
-        '<article class="booking-item"><div class="booking-item-main"><span class="label">RIDER // '+esc(b.riderName)+'</span><h3>'+esc(b.service)+'</h3>'+
-        '<p>'+esc(b.bikeModel)+' · '+niceDate(b.date)+' · '+esc(b.time)+' (Philippine time)</p>'+
-        (b.notes?'<p class="text-muted">Rider note: '+esc(b.notes)+'</p>':'')+'</div>'+
-        '<span class="pill '+(b.status==='Cancelled'||b.status==='Declined'?'danger':b.status==='Confirmed'||b.status==='Completed'?'good':'warn')+'">'+esc(b.status)+'</span></article>'
-      ).join('')+'</div>':'<div class="empty-state"><p>No rider appointment requests yet.</p></div>')+'</section>';
+    const pending=all.filter(x=>x.status==='Pending'),confirmed=all.filter(x=>x.status==='Confirmed');
+    const completed=all.filter(x=>x.status==='Completed');
+    const renderBooking=b=>'<article class="booking-item"><div class="booking-item-main">'+
+      '<span class="label">RIDER // '+esc(b.riderName)+'</span><h3>'+esc(b.service)+'</h3>'+
+      '<p>'+esc(b.bikeModel)+' · '+niceDate(b.date)+' · '+esc(b.time)+' (Philippine time)</p>'+
+      (b.notes?'<p class="text-muted">Rider note: '+esc(b.notes)+'</p>':'')+
+      (b.reviewNote?'<p class="booking-review-note">Workshop response: '+esc(b.reviewNote)+'</p>':'')+
+      '</div><div class="booking-item-actions"><span class="pill '+(b.status==='Cancelled'||b.status==='Declined'?'danger':b.status==='Confirmed'||b.status==='Completed'?'good':'warn')+'">'+esc(b.status)+'</span>'+
+      (['Pending','Confirmed'].includes(b.status)?'<button type="button" class="button small '+(b.status==='Pending'?'primary':'ghost')+'" data-action="review-rider-booking" data-id="'+esc(b.id)+'">'+(b.status==='Pending'?'REVIEW REQUEST':'UPDATE STATUS')+'</button>':'')+
+      '</div></article>';
+    return '<section class="panel rider-request-panel">'+
+      '<div class="panel-head"><div><div class="label">PHASE 4.4 // WORKSHOP BOOKING DECISIONS</div><h2>Rider Appointment Management</h2></div></div>'+
+      '<div class="booking-kpis">'+metric('PENDING REQUESTS',String(pending.length),'TO REVIEW','calendar')+
+      metric('CONFIRMED',String(confirmed.length),'BOOKINGS','checkCircle')+
+      metric('COMPLETED',String(completed.length),'VISITS','wrench')+'</div>'+
+      '<p class="text-muted">Review rider requests here. Confirming blocks the same exact time for other rider requests at your shop. It does not reserve a staffing capacity or guarantee service duration.</p>'+
+      (all.length?'<div class="booking-list">'+[...all].sort((a,b)=>Number(a.status!=='Pending')-Number(b.status!=='Pending')||a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).map(renderBooking).join('')+'</div>':
+       '<div class="empty-state"><p>No rider appointment requests yet.</p></div>')+'</section>';
   }
-  function appointmentsPage(){return `${head('WORKSHOP // TIME CONTROL','Appointments','Schedule upcoming customer servicing.',button('add-appointment','BOOK APPOINTMENT'))}${riderRequestsForShop()}<section class="panel table-panel"><div class="panel-head"><div><div class="label">SCHEDULED SERVICE QUEUE</div><h2>Upcoming Appointments</h2></div></div>${state.appointments.length?`<table class="data-table"><thead><tr><th>Customer</th><th>Requested Service</th><th>Date</th><th>Time</th><th>Status</th><th>Action</th></tr></thead><tbody>${[...state.appointments].sort((a,b)=>a.date.localeCompare(b.date)).map(a=>`<tr><td><strong>${esc(customerName(a.customerId))}</strong></td><td>${esc(a.service)}</td><td>${niceDate(a.date)}</td><td>${esc(a.time)}</td><td><span class="pill ${a.status==='Confirmed'?'good':'warn'}">${esc(a.status)}</span></td><td>${a.status==='Pending'?`<button class="button small ghost" data-action="confirm-appointment" data-id="${esc(a.id)}">CONFIRM</button>`:''}${a.status==='Confirmed'?`<button class="button small ghost" data-action="complete-appointment" data-id="${esc(a.id)}">COMPLETE</button>`:''}<button class="button small ghost" data-action="edit-appointment" data-id="${esc(a.id)}">EDIT</button><button class="button small ghost" data-action="delete-appointment" data-id="${esc(a.id)}">DELETE</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty-state"><h3>No appointments</h3></div>'}</section>`;}
+  function appointmentsPage(){return `${head('WORKSHOP // TIME CONTROL','Appointments','Review rider requests and manage manual customer appointments.',button('add-appointment','BOOK APPOINTMENT'))}${riderRequestsForShop()}<section class="panel table-panel"><div class="panel-head"><div><div class="label">SCHEDULED SERVICE QUEUE</div><h2>Upcoming Appointments</h2></div></div>${state.appointments.length?`<table class="data-table"><thead><tr><th>Customer</th><th>Requested Service</th><th>Date</th><th>Time</th><th>Status</th><th>Action</th></tr></thead><tbody>${[...state.appointments].sort((a,b)=>a.date.localeCompare(b.date)).map(a=>`<tr><td><strong>${esc(customerName(a.customerId))}</strong></td><td>${esc(a.service)}</td><td>${niceDate(a.date)}</td><td>${esc(a.time)}</td><td><span class="pill ${a.status==='Confirmed'?'good':'warn'}">${esc(a.status)}</span></td><td>${a.status==='Pending'?`<button class="button small ghost" data-action="confirm-appointment" data-id="${esc(a.id)}">CONFIRM</button>`:''}${a.status==='Confirmed'?`<button class="button small ghost" data-action="complete-appointment" data-id="${esc(a.id)}">COMPLETE</button>`:''}<button class="button small ghost" data-action="edit-appointment" data-id="${esc(a.id)}">EDIT</button><button class="button small ghost" data-action="delete-appointment" data-id="${esc(a.id)}">DELETE</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty-state"><h3>No appointments</h3></div>'}</section>`;}
   function reportsPage(){const jobs=state.jobs,done=jobs.filter(x=>x.status==='Completed'),val=done.reduce((a,x)=>a+Number(x.cost),0),avg=done.length?val/done.length:0;const row=[['Completed Services',done.length],['Open Services',jobs.length-done.length],['Registered Riders',state.customers.length],['Scheduled Appointments',state.appointments.length]];return `${head('WORKSHOP // DATA INTELLIGENCE','Service Reports','A simple overview of recorded shop activity.',`<button class="button small" data-action="export-jobs">${icon('download')} EXPORT JOBS</button>`)}<div class="shop-summary">${metric('COMPLETED JOBS',num(done.length),'TOTAL','checkCircle')}${metric('RECORDED JOB VALUE',cash(val),'PHP','chart')}${metric('AVG COMPLETED JOB',cash(avg),'PHP','speed')}${metric('ACTIVE CUSTOMER COUNT',num(state.customers.length),'RIDERS','users')}</div><div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="label">WORKSHOP OPERATIONS</div><h2>Activity Breakdown</h2></div></div>${row.map(([name,n])=>`<div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line-soft);padding:15px 0"><span class="text-muted">${esc(name)}</span><strong class="text-cyan">${num(n)}</strong></div>`).join('')}</section><section class="panel"><div class="panel-head"><div><div class="label">REPORT NOTICE</div><h2>Live Account Report</h2></div></div><p class="text-muted">These totals summarize service jobs and customers stored for your shop account. Job values are estimates, not verified payments or invoices.</p><div class="quick-actions"><button class="button small" data-action="export-jobs">${icon('download')} DOWNLOAD CSV</button></div></section></div>`;}
   function connectionsPage(role){
     const links=state.connections||[];
@@ -336,6 +345,19 @@
         '<p class="text-muted">The requested time is not guaranteed. The workshop will review pending requests in a later phase.</p>';
       submit='SEND REQUEST';
     }
+    else if(type==='review-rider-booking'){
+      record=state.riderAppointments.find(b=>b.id===id);
+      if(!record)return toast('Appointment request not found.');
+      const choices=record.status==='Pending'?[['Confirmed','Confirm Appointment'],['Declined','Decline Request']]:
+        record.status==='Confirmed'?[['Completed','Mark Completed'],['Cancelled','Cancel Confirmed Booking']]:[];
+      if(!choices.length)return toast('This appointment cannot be updated.');
+      title=record.status==='Pending'?'Review Rider Request':'Update Rider Booking';
+      subtitle=record.riderName+' · '+record.bikeModel+' · '+record.service+' · '+niceDate(record.date)+' at '+record.time+' (Philippine time)';
+      fields=selectField('status','Workshop decision',choices,choices[0][0])+
+        '<div class="field"><label for="f-review-note">Message to rider (optional)</label><textarea id="f-review-note" name="reviewNote" maxlength="250" rows="3" placeholder="e.g. We can service your motorcycle at this time.">'+esc(record.reviewNote||'')+'</textarea></div>'+
+        '<p class="text-muted">A confirmed appointment occupies this exact workshop date and time. Other requests at this time will need different arrangements.</p>';
+      submit='SAVE DECISION';
+    }
     else if(type==='add-appointment'||type==='edit-appointment'){if(!state.customers.length)return toast('Add a customer before booking.');record=type==='edit-appointment'?state.appointments.find(a=>a.id===id):null;title=record?'Edit Appointment':'Book Appointment';subtitle='Schedule and update a customer visit.';fields=`${selectField('customerId','Customer',state.customers.map(c=>[c.id,c.name+' • '+c.motorcycle]),record?.customerId)}${field('service','Requested service','text',record?.service||'','required maxlength="100"')}<div class="form-grid">${field('date','Date','date',record?.date||dateShift(1),'required')}${field('time','Time','time',record?.time||'09:00','required')}</div>${record?selectField('status','Appointment status',['Pending','Confirmed','Completed','Cancelled'],record.status):''}`;submit=record?'SAVE APPOINTMENT':'BOOK APPOINTMENT';}
     else return;
     lastFocus=document.activeElement;
@@ -427,6 +449,10 @@
         'Appointment request submitted. Await workshop review.');
       if(ok)navigate('/rider/bookings');return;
     }
+    if(type==='review-rider-booking'){
+      await persist('/rider-appointments/'+encodeURIComponent(id),'PATCH',
+        {status:v.status,reviewNote:v.reviewNote||''},'Rider booking updated to '+v.status+'.');return;
+    }
     if(type==='add-appointment'||type==='edit-appointment'){await persist(type==='edit-appointment'?'/appointments/'+encodeURIComponent(id):'/appointments',type==='edit-appointment'?'PATCH':'POST',{customerId:v.customerId,service:v.service,date:v.date,time:v.time,status:v.status},type==='edit-appointment'?'Appointment updated.':'Appointment booked.');return;}
   }
   function downloadCsv(name,rows){if(!rows.length){toast('No records to export.');return;}const keys=Object.keys(rows[0]);const csv=[keys.join(','),...rows.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))].join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);toast('CSV export prepared.');}
@@ -441,7 +467,7 @@
     if(a==='switch-role'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;state.role=el.dataset.role;mobileOpen=false;notifyOpen=false;navigate('/login');toast('Sign in with a '+(state.role==='shop'?'workshop':'rider')+' account to switch.');}catch(error){toast(error.message);}return;}
     if(a==='notifications'){notifyOpen=!notifyOpen;render();return;}
     if(a==='logout'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;mobileOpen=false;notifyOpen=false;navigate('/');toast('Signed out successfully.');}catch(error){toast(error.message);}return;}
-    if(['add-bike','edit-bike','add-component','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment','request-appointment'].includes(a)){openModal(a,id);return;}
+    if(['add-bike','edit-bike','add-component','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment','request-appointment','review-rider-booking'].includes(a)){openModal(a,id);return;}
     if(a==='archive-component'||a==='restore-component'){
       const archived=a==='archive-component';
       if(archived&&!confirm('Archive this component? Its reminders will be paused, and you can restore it later.'))return;
@@ -460,7 +486,7 @@
      }
      if(a==='select-bike'){state.selectedBike=id;save();render();toast('Active motorcycle changed.');return;}
     if(a==='cancel-rider-appointment'){
-      if(!confirm('Cancel this pending appointment request?'))return;
+      if(!confirm('Cancel this appointment? The workshop will see the cancellation in its appointment queue.'))return;
       await persist('/rider-appointments/'+encodeURIComponent(id),'PATCH',{status:'Cancelled'},'Appointment request cancelled.',{close:false});return;
     }
     if(a==='advance-job'){const j=state.jobs.find(x=>x.id===id);if(j)await persist('/jobs/'+encodeURIComponent(id),'PATCH',{status:j.status==='Pending'?'In Progress':'Completed'},'Job status updated.',{close:false});return;}
