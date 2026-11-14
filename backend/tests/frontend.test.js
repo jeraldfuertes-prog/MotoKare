@@ -155,6 +155,31 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  const linked=appSession(base,rider.cookie,'#/rider/connections');
  await wait(()=>linked.elements['#app'].innerHTML.includes('DISCONNECT'));
  assert.doesNotMatch(linked.elements['#app'].innerHTML,/r@ui.test/);
+ // Phase 4.6: in-app notification page, bell, unread, read-all and dismissal.
+ const notifyRider=appSession(base,rider.cookie,'#/rider/notifications');
+ await wait(()=>notifyRider.elements['#app'].innerHTML.includes('accepted your connection request'));
+ assert.match(notifyRider.elements['#app'].innerHTML,/Activity Inbox/);
+ assert.match(notifyRider.elements['#app'].innerHTML,/UNREAD ACTIVITY/);
+ assert.match(notifyRider.elements['#app'].innerHTML,/MARK ALL READ/);
+ const events=(await send(base,'/api/notification-inbox','GET',undefined,rider.cookie)).data;
+ assert.equal(events.unreadCount,1);
+ assert.equal(events.notifications[0].type,'connection-decision');
+ notifyRider.listeners.click({target:{closest:()=>({dataset:{action:'notifications'}})}});
+ assert.match(notifyRider.elements['#app'].innerHTML,/VIEW ALL NOTIFICATIONS/);
+ assert.match(notifyRider.elements['#app'].innerHTML,/MARK READ/);
+ notifyRider.listeners.click({target:{closest:()=>({dataset:{action:'notification-toggle-read',id:events.notifications[0].id}})}});
+ await wait(()=>notifyRider.elements['#toast-root'].innerHTML.includes('Notification marked read.'));
+ assert.equal((await send(base,'/api/notification-inbox','GET',undefined,rider.cookie)).data.unreadCount,0);
+ notifyRider.listeners.click({target:{closest:()=>({dataset:{action:'notification-toggle-read',id:events.notifications[0].id}})}});
+ await wait(()=>notifyRider.elements['#toast-root'].innerHTML.includes('Notification marked unread.'));
+ assert.equal((await send(base,'/api/notification-inbox','GET',undefined,rider.cookie)).data.unreadCount,1);
+ notifyRider.listeners.click({target:{closest:()=>({dataset:{action:'notification-read-all'}})}});
+ await wait(()=>notifyRider.elements['#toast-root'].innerHTML.includes('All activity notifications marked read.'));
+ assert.equal((await send(base,'/api/notification-inbox','GET',undefined,rider.cookie)).data.unreadCount,0);
+ notifyRider.context.confirm=()=>true;
+ notifyRider.listeners.click({target:{closest:()=>({dataset:{action:'notification-dismiss',id:events.notifications[0].id}})}});
+ await wait(()=>notifyRider.elements['#app'].innerHTML.includes('No activity updates yet'));
+ assert.equal((await send(base,'/api/notification-inbox','GET',undefined,rider.cookie)).data.notifications.length,0);
  // Phase 4.3: booking request UI, workshop inbox and rider cancellation.
  linked.location.hash='#/rider/bookings';linked.listeners.hashchange();
  assert.match(linked.elements['#app'].innerHTML,/My Bookings/);
