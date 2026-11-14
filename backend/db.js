@@ -73,9 +73,12 @@ const connectionRows = user => stmt('SELECT c.id,c.rider_id AS "riderId",c.shop_
 // These queries expose only the specific submitted report or explicitly shared service entry.
 const serviceReportRows = user => stmt('SELECT sr.id,sr.appointment_id AS "appointmentId",sr.rider_id AS "riderId",sr.shop_id AS "shopId",sr.bike_id AS "bikeId",sr.bike_model AS "bikeModel",sr.service,sr.service_date AS "serviceDate",sr.cost,sr.notes,sr.status,sr.imported_service_id AS "importedServiceId",sr.created_at AS "createdAt",sr.reviewed_at AS "reviewedAt",u.name AS "riderName",sp.shop_name AS "shopName" FROM shop_service_reports sr JOIN users u ON u.id=sr.rider_id JOIN users sp ON sp.id=sr.shop_id WHERE '+(user.role==='rider'?'sr.rider_id=?':'sr.shop_id=?')+' ORDER BY sr.created_at DESC LIMIT 300').all(user.id);
 const serviceShareRows = user => stmt('SELECT sh.id,sh.rider_id AS "riderId",sh.shop_id AS "shopId",sh.service_id AS "serviceId",sh.created_at AS "createdAt",sv.type,sv.date,sv.cost,sv.shop,sv.notes,b.model AS "bikeModel",r.name AS "riderName",sp.shop_name AS "shopName" FROM rider_service_shares sh JOIN services sv ON sv.id=sh.service_id AND sv.user_id=sh.rider_id JOIN bikes b ON b.id=sv.bike_id JOIN users r ON r.id=sh.rider_id JOIN users sp ON sp.id=sh.shop_id JOIN account_connections c ON c.rider_id=sh.rider_id AND c.shop_id=sh.shop_id AND c.status=? WHERE '+(user.role==='rider'?'sh.rider_id=?':'sh.shop_id=?')+' ORDER BY sh.created_at DESC LIMIT 300').all('accepted',user.id);
+// Only the recipient can retrieve their own notification feed.
+const notificationRows = id => stmt('SELECT id,type,message,route,created_at AS "createdAt",read_at AS "readAt" FROM account_notifications WHERE recipient_id=? ORDER BY created_at DESC,id DESC LIMIT 80').all(id);
+const notificationUnreadCount = id => stmt('SELECT COUNT(*)::int AS count FROM account_notifications WHERE recipient_id=? AND read_at IS NULL').get(id);
 async function bootstrap(user) {
   const rider = user.role === 'rider';
-  const [bikes, components, services, customers, jobs, appointments, shops, connections, profile, riderAppointments, serviceReports, serviceShares] = await Promise.all([
+  const [bikes, components, services, customers, jobs, appointments, shops, connections, profile, riderAppointments, serviceReports, serviceShares, notificationInbox, unreadRow] = await Promise.all([
     rider ? bikeRows(user.id) : [],
     rider ? componentRows(user.id) : [],
     rider ? serviceRows(user.id) : [],
@@ -88,12 +91,14 @@ async function bootstrap(user) {
     riderAppointmentRows(user),
     serviceReportRows(user),
     serviceShareRows(user),
+    notificationRows(user.id),
+    notificationUnreadCount(user.id),
   ]);
   return {
     version: 4, role: user.role, selectedBike: null,
     session: { name: user.name, email: user.email, mode: user.role },
-    bikes, components, services, customers, jobs, appointments, shops, connections, shopProfile:profile, riderAppointments, serviceReports, serviceShares,
+    bikes, components, services, customers, jobs, appointments, shops, connections, shopProfile:profile, riderAppointments, serviceReports, serviceShares, notificationInbox, notificationUnreadCount:unreadRow.count,
     settings: { shopName: user.shopName || '', notifications: true, distance: 'km' },
   };
 }
-module.exports = { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows, serviceReportRows, serviceShareRows };
+module.exports = { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows, serviceReportRows, serviceShareRows, notificationRows, notificationUnreadCount };

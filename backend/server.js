@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, randomBytes, scrypt: scryptCallback, timingSafeEqual, createHash } = require('node:crypto');
 const { promisify } = require('node:util');
-const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows, serviceReportRows, serviceShareRows } = require('./db');
+const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows, serviceReportRows, serviceShareRows, notificationRows, notificationUnreadCount } = require('./db');
 const scrypt=promisify(scryptCallback);
 const PORT=Number(process.env.PORT||3000);
 const HOST=process.env.HOST||'127.0.0.1';
@@ -21,6 +21,10 @@ const componentCatalog=[
  ['Valve Clearance','settings',180],['Clutch Inspection','wrench',120]
  ].map(([name,icon,suggestedDays])=>({name,icon,suggestedDays}))
 ];
+// Server-authorized recipients and in-app routes only. No email or browser push delivery.
+const notify = (recipientId,type,message,route,db=stmt) =>
+ db('INSERT INTO account_notifications(id,recipient_id,type,message,route) VALUES(?,?,?,?,?)')
+ .run(randomUUID(),recipientId,type,message,route);
 const SHOP_SERVICES=['Oil Change','Brake Service','Tire Service','Chain & Sprocket','Battery Service','Air Filter','Engine Repair','General Inspection','Other'];
 const fail=(code,message)=>{const e=new Error(message);e.status=code;throw e;};
 const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const a=Object.fromEntries(p.map(x=>[x.type,x.value]));return a.year+'-'+a.month+'-'+a.day;};
@@ -74,6 +78,27 @@ async function api(req,res,url){
  if(path==='/api/auth/me'&&method==='GET')return send(res,200,{user:sanitizeUser(await requireUser(req))});
  const user=await requireUser(req);
  if(path==='/api/bootstrap'&&method==='GET')return send(res,200,await bootstrap(user));
+ if(path==='/api/notification-inbox'&&method==='GET'){
+  const [rows,count]=await Promise.all([notificationRows(user.id),notificationUnreadCount(user.id)]);
+  return send(res,200,{notifications:rows,unreadCount:count.count});
+ }
+ if(path==='/api/notification-inbox/read-all'&&method==='POST'){
+  const changed=await stmt('UPDATE account_notifications SET read_at=NOW() WHERE recipient_id=? AND read_at IS NULL').run(user.id);
+  return send(res,200,{ok:true,changed:changed.changes});
+ }
+ const inboxItem=path.match(/^\/api\/notification-inbox\/([0-9a-f-]+)$/);
+ if(inboxItem&&method==='PATCH'){
+  const b=await body(req);
+  if(typeof b.read!=='boolean')fail(400,'Read status must be true or false');
+  const result=await stmt('UPDATE account_notifications SET read_at=CASE WHEN ? THEN COALESCE(read_at,NOW()) ELSE NULL END WHERE id=? AND recipient_id=? RETURNING id').get(b.read,inboxItem[1],user.id);
+  if(!result)fail(404,'Notification not found');
+  return send(res,200,{ok:true,read:b.read});
+ }
+ if(inboxItem&&method==='DELETE'){
+  const result=await stmt('DELETE FROM account_notifications WHERE id=? AND recipient_id=? RETURNING id').get(inboxItem[1],user.id);
+  if(!result)fail(404,'Notification not found');
+  return send(res,200,{ok:true});
+ }
  if(path==='/api/me'&&method==='PATCH'){
   const b=await body(req),name=text(b.name,'Display name',80,{min:2}),e=email(b.email),shopName=user.role==='shop'?text(b.shopName,'Workshop name',100,{min:2}):'';
   try{await stmt('UPDATE users SET name=?,email=?,shop_name=? WHERE id=?').run(name,e,shopName,user.id);}catch(err){if(err.code==='23505')fail(409,'Email already in use');throw err;}

@@ -188,3 +188,16 @@ CREATE TABLE IF NOT EXISTS rider_service_shares (
  UNIQUE(rider_id,shop_id,service_id)
 );
 CREATE INDEX IF NOT EXISTS rider_service_shares_shop ON rider_service_shares(shop_id,created_at);
+
+-- Phase 4.6: private, persistent in-app activity notifications.
+CREATE TABLE IF NOT EXISTS account_notifications (
+ id TEXT PRIMARY KEY,
+ recipient_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ type TEXT NOT NULL,
+ message TEXT NOT NULL,
+ route TEXT NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ read_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS notifications_inbox_latest ON account_notifications(recipient_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS notifications_inbox_unread ON account_notifications(recipient_id,created_at DESC) WHERE read_at IS NULL;
