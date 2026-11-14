@@ -71,3 +71,15 @@ a{color:inherit;text-decoration:none} button,input,select,textarea{font:inherit}
   .component-row:has(.component-row-actions) .comp-status{grid-column:2;text-align:left}
   .component-row:has(.component-row-actions) .component-row-actions{grid-column:1/-1}
 }
+
+/* Phase 4.3: rider appointment requests and shop-side inbox. */
+.appointment-requests,.rider-request-panel{margin-top:20px}
+.booking-list{display:grid;gap:0;margin-top:15px}
+.booking-item{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 0;border-bottom:1px solid var(--line-soft)}
+.booking-item:last-child{border-bottom:0}
+.booking-item-main{min-width:0;flex:1}
+.booking-item-main h3{font-family:var(--display);font-size:21px;overflow-wrap:anywhere;margin:7px 0}
+.booking-item-main p{font-size:11px;color:var(--muted);line-height:1.6;overflow-wrap:anywhere}
+.booking-item-actions{display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0}
+.booking-item-actions .button{white-space:nowrap}
+@media(max-width:620px){.booking-item{align-items:flex-start;flex-direction:column;gap:12px}.booking-item-actions{flex-direction:row;align-items:center;flex-wrap:wrap;width:100%}}
