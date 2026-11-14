@@ -206,6 +206,75 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  const cancelled=(await send(base,'/api/rider-appointments','GET',undefined,rider.cookie)).data.appointments;
  assert.equal(cancelled[0].status,'Cancelled');
  assert.equal(cancelled[0].reviewNote,'Please arrive ten minutes early');
+ // Phase 4.5: workshop report submission, explicit rider import, selective share and revocation.
+ const tomorrow=new Date(Date.now()+4*86400000).toISOString().slice(0,10);
+ const visit=await send(base,'/api/rider-appointments','POST',{shopId,bikeId:bike.data.id,service:'Engine Oil',date:tomorrow,time:'11:00'},rider.cookie);
+ assert.equal(visit.status,201,JSON.stringify(visit.data));
+ assert.equal((await send(base,'/api/rider-appointments/'+visit.data.id,'PATCH',{status:'Confirmed',reviewNote:'Welcome'},shop.cookie)).status,200);
+ await pool.query('UPDATE rider_appointment_requests SET date=$1 WHERE id=$2',[serviceDate,visit.data.id]);
+ assert.equal((await send(base,'/api/rider-appointments/'+visit.data.id,'PATCH',{status:'Completed'},shop.cookie)).status,200);
+ const shopReports=appSession(base,shop.cookie,'#/shop/appointments');
+ await wait(()=>shopReports.elements['#app'].innerHTML.includes('SUBMIT SERVICE REPORT'));
+ shopReports.listeners.click({target:{closest:()=>({dataset:{action:'submit-service-report',id:visit.data.id}})}});
+ assert.match(shopReports.elements['#modal-root'].innerHTML,/Submit Service Report/);
+ assert.match(shopReports.elements['#modal-root'].innerHTML,/Work performed/);
+ const nowPH=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(x=>[x.type,x.value]));
+ const todayPH=nowPH.year+'-'+nowPH.month+'-'+nowPH.day;
+ shopReports.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ shopReports.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'submit-service-report',id:visit.data.id},values:{
+   service:'Synthetic Oil Service',serviceDate:todayPH,cost:'375',notes:'Oil changed by workshop'
+ }})}});
+ await wait(()=>shopReports.elements['#app'].innerHTML.includes('VIEW SUBMITTED REPORT'));
+ const submitted=(await send(base,'/api/service-reports','GET',undefined,shop.cookie)).data.reports;
+ assert.equal(submitted.length,1);assert.equal(submitted[0].status,'Pending');
+ const reviewRider=appSession(base,rider.cookie,'#/rider/records');
+ await wait(()=>reviewRider.elements['#app'].innerHTML.includes('Oil changed by workshop'));
+ assert.match(reviewRider.elements['#app'].innerHTML,/REVIEW REPORT/);
+ assert.match(reviewRider.elements['#app'].innerHTML,/Shared Records/);
+ reviewRider.listeners.click({target:{closest:()=>({dataset:{action:'review-service-report',id:submitted[0].id}})}});
+ assert.match(reviewRider.elements['#modal-root'].innerHTML,/Review Workshop Report/);
+ assert.match(reviewRider.elements['#modal-root'].innerHTML,/375/);
+ assert.match(reviewRider.elements['#modal-root'].innerHTML,/Accept and import into my history/);
+ reviewRider.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ reviewRider.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'review-service-report',id:submitted[0].id},values:{
+   decision:'Accepted',componentId:''
+ }})}});
+ await wait(()=>reviewRider.elements['#app'].innerHTML.includes('IMPORTED'));
+ assert.equal((await send(base,'/api/service-reports','GET',undefined,rider.cookie)).data.reports[0].status,'Accepted');
+ assert.equal((await send(base,'/api/services','GET',undefined,rider.cookie)).data.services.some(x=>x.type==='Synthetic Oil Service'),true);
+ assert.equal((await send(base,'/api/service-shares','GET',undefined,shop.cookie)).data.shares.length,0,'Import does not share unrelated rider history');
+ const historyUI=appSession(base,rider.cookie,'#/rider/history');
+ await wait(()=>historyUI.elements['#app'].innerHTML.includes('UI Custom Component'));
+ assert.match(historyUI.elements['#app'].innerHTML,/SHARE SELECTED/);
+ const original=(await send(base,'/api/services','GET',undefined,rider.cookie)).data.services.find(x=>x.type==='UI Custom Component');
+ assert.ok(original);
+ historyUI.listeners.click({target:{closest:()=>({dataset:{action:'share-service',id:original.id}})}});
+ assert.match(historyUI.elements['#modal-root'].innerHTML,/Share Selected Service Entry/);
+ assert.match(historyUI.elements['#modal-root'].innerHTML,/Inspected/);
+ historyUI.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ historyUI.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'share-service',id:original.id},values:{shopId}})}});
+ await wait(()=>historyUI.elements['#app'].innerHTML.includes('Shared with 1'));
+ const shares=(await send(base,'/api/service-shares','GET',undefined,shop.cookie)).data.shares;
+ assert.equal(shares.length,1);assert.equal(shares[0].serviceId,original.id);
+ const shopShared=appSession(base,shop.cookie,'#/shop/records');
+ await wait(()=>shopShared.elements['#app'].innerHTML.includes('UI Custom Component'));
+ assert.match(shopShared.elements['#app'].innerHTML,/Rider Test/);
+ assert.match(shopShared.elements['#app'].innerHTML,/Shared Records/);
+ const riderShares=appSession(base,rider.cookie,'#/rider/records');
+ await wait(()=>riderShares.elements['#app'].innerHTML.includes('REVOKE ACCESS'));
+ riderShares.context.confirm=()=>true;
+ riderShares.listeners.click({target:{closest:()=>({dataset:{action:'revoke-service-share',id:shares[0].id}})}});
+ await wait(()=>riderShares.elements['#app'].innerHTML.includes('No private service entries shared'));
+ assert.equal((await send(base,'/api/service-shares','GET',undefined,shop.cookie)).data.shares.length,0);
  const anonymous=appSession(base,'','#/rider/dashboard');
  await wait(()=>anonymous.location.hash==='#/login');
  assert.match(anonymous.elements['#app'].innerHTML,/System Login/);
