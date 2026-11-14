@@ -102,13 +102,22 @@
   async function initialize(){
     try{await refresh();}
     catch(error){if(!/sign in|continue/i.test(error.message))toast(error.message);}
-    finally{loaded=true;render();}
+    finally{loaded=true;render();scrollToLandingSection();}
   }
   function save(){try{if(state.selectedBike)localStorage.setItem(SELECTION_KEY,state.selectedBike);}catch{}}
   let route='', mobileOpen=false, notifyOpen=false, toastTimer;
   const routesRider=[['dashboard','Dashboard','dashboard'],['motorcycles','My Motorcycles','bike'],['components','Components','settings'],['maintenance','Maintenance','calendar'],['history','Service History','history'],['records','Shared Records','history'],['connections','Repair Shops','store'],['bookings','My Bookings','calendar'],['notifications','Notifications','bell'],['settings','Settings','settings']];
   const routesShop=[['dashboard','Shop Dashboard','dashboard'],['customers','Customers','users'],['jobs','Service Jobs','wrench'],['appointments','Appointments','calendar'],['reports','Reports','chart'],['records','Shared Records','history'],['connections','Rider Connections','users'],['notifications','Notifications','bell'],['settings','Settings','settings']];
   const routeNow=()=> (location.hash.slice(1).split('?')[0] || '/');
+  const landingSections={'/':'home','/home':'home','/features':'features','/roles':'roles','/how':'how','/pricing':'pricing'};
+  function scrollToLandingSection(){
+    const section=landingSections[routeNow()];
+    if(!section)return false;
+    const target=document.getElementById?.(section);
+    if(!target)return false;
+    target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+    return true;
+  }
   const parseAppRoute = path => {const a=path.split('/').filter(Boolean);return {role:a[0]==='shop'?'shop':'rider',page:a[1]||'dashboard'};};
   function navigate(path){location.hash='#'+path; if(routeNow()===path) render();}
   function ensureBike(){let bike=state.bikes.find(x=>x.id===state.selectedBike);if(!bike){bike=state.bikes[0];state.selectedBike=bike?.id??null;}return bike;}
@@ -127,7 +136,7 @@
   const totalCosts=bike=>state.services.filter(s=>s.bikeId===bike?.id).reduce((a,s)=>a+Number(s.cost||0),0);
   function toast(msg){clearTimeout(toastTimer);toastRoot.innerHTML=`<div class="toast">${icon('checkCircle')} ${esc(msg)}</div>`;toastTimer=setTimeout(()=>toastRoot.innerHTML='',3600);}
   function ticker(){return `<div class="ticker" aria-label="MotoKare system information"><span class="ticker-track">MOTOKARE // MAINTENANCE INTELLIGENCE <span class="sep">✦</span> RIDER AND WORKSHOP SYSTEMS <span class="sep">✦</span> SCHEDULE-BASED TRACKING <span class="sep">✦</span> SECURE ACCOUNT DATA <span class="sep">✦</span> RIDE SMART. MAINTAIN BETTER.</span></div>`;}
-  function landingHeader(){return `<header class="site-header"><div class="container nav-inner">${logo()}<nav class="nav-links" id="site-nav" aria-label="Main navigation"><a href="#/" data-scroll="home">Home</a><a href="#/" data-scroll="features">Features</a><a href="#/" data-scroll="roles">Who It's For</a><a href="#/" data-scroll="how">How It Works</a><a href="#/" data-scroll="pricing">Pricing</a></nav><div class="nav-actions"><a class="button ghost small" href="#/login">Log In</a><a class="button small primary" href="#/register">Get Started ${icon('arrow')}</a><button class="nav-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-action="mobile-nav">${icon('menu')}</button></div></div></header>`;}
+  function landingHeader(){return `<header class="site-header"><div class="container nav-inner">${logo()}<nav class="nav-links" id="site-nav" aria-label="Main navigation"><a href="#/" data-scroll="home">Home</a><a href="#/features" data-scroll="features">Features</a><a href="#/roles" data-scroll="roles">Who It's For</a><a href="#/how" data-scroll="how">How It Works</a><a href="#/pricing" data-scroll="pricing">Pricing</a></nav><div class="nav-actions"><a class="button ghost small" href="#/login">Log In</a><a class="button small primary" href="#/register">Get Started ${icon('arrow')}</a><button class="nav-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-action="mobile-nav">${icon('menu')}</button></div></div></header>`;}
   function landing(){
     const features=[['calendar','Maintenance Scheduling','Stay ahead of oil changes, brake checks, and service intervals with one digital schedule.'],['bell','Intelligent Reminders','Get clear service-due indicators based on recorded dates and odometer readings.'],['history','Service History','Maintain an organized timeline of past servicing, repair expenses, and workshops.'],['calendar','Date-Based Tracking','See upcoming service dates and remaining days without entering odometer readings.'],['store','Repair Shop Workspace','Keep customer records, manage service jobs, and plan upcoming appointments.'],['chart','Maintenance Reports','See historical service activity and cost summaries in a streamlined dashboard.']];
     return `${landingHeader()}<main id="main"><section class="hero" id="home"><div class="container hero-layout"><div><div class="kicker"><span class="status-dot"></span> MOTORCYCLE MAINTENANCE // REIMAGINED</div><h1 class="hero-title"><span>YOUR RIDE.</span><span class="accent">UNDER</span><span>CONTROL.</span></h1><p class="hero-desc">The next-generation maintenance command center for motorcycle riders and repair shops. Track your bike, plan every service, and keep your maintenance history on one connected platform.</p><div class="hero-actions"><a class="button primary" href="#/register">INITIALIZE YOUR ACCOUNT ${icon('arrow')}</a><a class="button" href="#/register">CREATE YOUR WORKSPACE ${icon('chevron')}</a></div><div class="hero-proof"><div class="proof-item"><strong>01</strong><span>Track your ride</span></div><div class="proof-item"><strong>02</strong><span>Never miss service</span></div><div class="proof-item"><strong>03</strong><span>Connect your shop</span></div></div></div><div class="hero-visual"><div class="radar-ring" aria-hidden="true"></div><div class="radar-sweep" aria-hidden="true"></div>${blueprint('bike-svg')}<div class="spec top"><small>VEHICLE STATUS</small><div class="val">ONLINE</div><div class="system-status"><span class="status-dot ok"></span> SYSTEM READY</div></div><div class="spec bottom"><small>ILLUSTRATIVE ODOMETER</small><div class="val">12,450 <span style="font-size:13px">KM</span></div><small>MAINTENANCE ANALYTICS</small></div><span class="frame-corner left">MK // TECH-01</span><span class="frame-corner right">[ 001 : ACTIVE ]</span></div></div></section>${ticker()}
@@ -427,7 +436,7 @@
       '<div class="inbox-queue-label label">ACTION REQUIRED / DATE REMINDERS</div>'+attentionList(5)+'</aside>';
   }
 
-  function render(){route=routeNow();if(!loaded){app.innerHTML='<main class="container" style="padding:8rem 1rem"><div class="label">CONNECTING TO MOTOKARE SERVER...</div></main>';return;}if(route.startsWith('/rider/')||route.startsWith('/shop/')){if(!state.session){navigate('/login');return;}const role=parseAppRoute(route).role;if(role!==state.session.mode){navigate('/'+state.session.mode+'/dashboard');return;}}document.body.classList.remove('app-mode');let content;if(route==='/'||route==='/home')content=landing();else if(route==='/login'||route==='/register')content=authPage(route.slice(1));else{const {role,page}=parseAppRoute(route),valid=(role==='rider'?routesRider:routesShop).map(x=>x[0]);if(!valid.includes(page)){navigate('/');return;}const contentMap=role==='rider'?{dashboard:riderDash,motorcycles:motorcyclesPage,components:componentsPage,maintenance:maintenancePage,history:historyPage,connections:()=>connectionsPage('rider'),bookings:bookingsPage,records:()=>sharedRecordsPage('rider'),notifications:notificationPage,settings:()=>settingsPage('rider')}:{dashboard:shopDash,customers:customersPage,jobs:jobsPage,appointments:appointmentsPage,reports:reportsPage,connections:()=>connectionsPage('shop'),records:()=>sharedRecordsPage('shop'),notifications:notificationPage,settings:()=>settingsPage('shop')};content=appShell(role,page,contentMap[page]());}
+  function render(){route=routeNow();if(!loaded){app.innerHTML='<main class="container" style="padding:8rem 1rem"><div class="label">CONNECTING TO MOTOKARE SERVER...</div></main>';return;}if(route.startsWith('/rider/')||route.startsWith('/shop/')){if(!state.session){navigate('/login');return;}const role=parseAppRoute(route).role;if(role!==state.session.mode){navigate('/'+state.session.mode+'/dashboard');return;}}document.body.classList.remove('app-mode');let content;if(Object.prototype.hasOwnProperty.call(landingSections,route))content=landing();else if(route==='/login'||route==='/register')content=authPage(route.slice(1));else{const {role,page}=parseAppRoute(route),valid=(role==='rider'?routesRider:routesShop).map(x=>x[0]);if(!valid.includes(page)){navigate('/');return;}const contentMap=role==='rider'?{dashboard:riderDash,motorcycles:motorcyclesPage,components:componentsPage,maintenance:maintenancePage,history:historyPage,connections:()=>connectionsPage('rider'),bookings:bookingsPage,records:()=>sharedRecordsPage('rider'),notifications:notificationPage,settings:()=>settingsPage('rider')}:{dashboard:shopDash,customers:customersPage,jobs:jobsPage,appointments:appointmentsPage,reports:reportsPage,connections:()=>connectionsPage('shop'),records:()=>sharedRecordsPage('shop'),notifications:notificationPage,settings:()=>settingsPage('shop')};content=appShell(role,page,contentMap[page]());}
     app.innerHTML=content + notifications();document.title=`MotoKare | ${route==='/'?'Ride Smart. Maintain Better.':route==='/login'?'Log In':route==='/register'?'Register':breadcrumb(route.split('/').pop())}`;
     // Move keyboard focus only after route navigation initiated by user; avoid auto-scrolling on initial load.
   }
@@ -727,7 +736,22 @@
     if(a==='delete-job'){if(confirm('Delete this job? This cannot be undone.'))await persist('/jobs/'+encodeURIComponent(id),'DELETE',undefined,'Job deleted.',{close:false});return;}
     if(a==='delete-appointment'){if(confirm('Delete this appointment? This cannot be undone.'))await persist('/appointments/'+encodeURIComponent(id),'DELETE',undefined,'Appointment deleted.',{close:false});return;}
   }
-  document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(el)clickAction(el,e);else if(notifyOpen&&!e.target.closest('.notify-panel')){notifyOpen=false;render();}});
+  document.addEventListener('click',e=>{
+    const landingLink=e.target.closest('[data-scroll]');
+    if(landingLink&&Object.values(landingSections).includes(landingLink.dataset.scroll)){
+      const targetRoute=landingLink.dataset.scroll==='home'?'/':'/'+landingLink.dataset.scroll;
+      if(routeNow()===targetRoute){
+        // Browsers do not fire hashchange when the user clicks the same hash twice.
+        e.preventDefault();
+        scrollToLandingSection();
+        document.querySelector('#site-nav')?.classList.remove('open');
+      }
+      return;
+    }
+    const el=e.target.closest('[data-action]');
+    if(el)clickAction(el,e);
+    else if(notifyOpen&&!e.target.closest('.notify-panel')){notifyOpen=false;render();}
+  });
   document.addEventListener('change',e=>{
     const form=e.target.closest?.('form[data-form="add-component"],form[data-form="edit-component"]');
     if(!form)return;
@@ -740,7 +764,10 @@
   });
   document.addEventListener('submit',e=>{const form=e.target.closest('[data-form]');if(!form)return;e.preventDefault();handleForm(form);});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(modalRoot.innerHTML)closeModal();else if(notifyOpen){notifyOpen=false;render();}else if(mobileOpen){mobileOpen=false;render();}}if(e.key==='Tab'&&modalRoot.innerHTML){const links=[...modalRoot.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')];if(!links.length)return;const first=links[0],last=links[links.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
-  window.addEventListener('hashchange',()=>{mobileOpen=false;notifyOpen=false;closeModal();render();window.scrollTo({top:0,behavior:'auto'});});
+  window.addEventListener('hashchange',()=>{
+    mobileOpen=false;notifyOpen=false;closeModal();render();
+    if(!scrollToLandingSection())window.scrollTo({top:0,behavior:'auto'});
+  });
   let visibleDay=today();
   const checkCalendarDate=()=>{const date=today();if(date!==visibleDay){visibleDay=date;if(loaded)render();}};
   window.addEventListener('focus',checkCalendarDate);

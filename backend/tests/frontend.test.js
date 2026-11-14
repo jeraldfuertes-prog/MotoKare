@@ -300,6 +300,32 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  riderShares.listeners.click({target:{closest:()=>({dataset:{action:'revoke-service-share',id:shares[0].id}})}});
  await wait(()=>riderShares.elements['#app'].innerHTML.includes('No private service entries shared'));
  assert.equal((await send(base,'/api/service-shares','GET',undefined,shop.cookie)).data.shares.length,0);
+ // Landing navigation: each link must route to the matching section and scroll to it.
+ const landing=appSession(base,'','#/');
+ await wait(()=>landing.elements['#app'].innerHTML.includes('ENGINEERED FOR'));
+ const nav=landing.elements['#app'].innerHTML;
+ const sections=[['Home','/','home'],['Features','/features','features'],["Who It's For",'/roles','roles'],['How It Works','/how','how'],['Pricing','/pricing','pricing']];
+ for(const [label,route,section] of sections){
+   assert.ok(nav.includes('href="#'+route+'" data-scroll="'+section+'"'),label+' must link to the correct section');
+   assert.ok(nav.includes('id="'+section+'"'),'Target section '+section+' must exist');
+ }
+ const scrolled=[];
+ landing.document.getElementById=id=>({scrollIntoView:options=>scrolled.push({id,options})});
+ for(const [,path,section] of sections){
+   landing.location.hash='#'+path;
+   landing.listeners.hashchange();
+   assert.equal(scrolled.at(-1).id,section,'Hash navigation must scroll to '+section);
+   assert.match(landing.elements['#app'].innerHTML,/YOUR RIDE/,'Changing landing section must not show an error route');
+ }
+ const before=scrolled.length;
+ landing.listeners.click({preventDefault(){},target:{
+   closest:selector=>selector==='[data-scroll]'?{dataset:{scroll:'pricing'}}:null
+ }});
+ assert.equal(scrolled.length,before+1,'Clicking the active Pricing link should still scroll');
+ assert.equal(scrolled.at(-1).id,'pricing');
+ const deepLink=appSession(base,'','#/features');
+ await wait(()=>deepLink.elements['#app'].innerHTML.includes('ENGINEERED FOR'));
+ assert.match(deepLink.elements['#app'].innerHTML,/id="features"/,'Direct navigation to Features must render homepage sections');
  const anonymous=appSession(base,'','#/rider/dashboard');
  await wait(()=>anonymous.location.hash==='#/login');
  assert.match(anonymous.elements['#app'].innerHTML,/System Login/);
