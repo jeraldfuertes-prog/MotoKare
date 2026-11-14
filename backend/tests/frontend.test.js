@@ -155,6 +155,38 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  const linked=appSession(base,rider.cookie,'#/rider/connections');
  await wait(()=>linked.elements['#app'].innerHTML.includes('DISCONNECT'));
  assert.doesNotMatch(linked.elements['#app'].innerHTML,/r@ui.test/);
+ // Phase 4.3: booking request UI, workshop inbox and rider cancellation.
+ linked.location.hash='#/rider/bookings';linked.listeners.hashchange();
+ assert.match(linked.elements['#app'].innerHTML,/My Bookings/);
+ assert.match(linked.elements['#app'].innerHTML,/REQUEST APPOINTMENT/);
+ linked.listeners.click({target:{closest:()=>({dataset:{action:'request-appointment'}})}});
+ assert.match(linked.elements['#modal-root'].innerHTML,/Connected workshop/);
+ assert.match(linked.elements['#modal-root'].innerHTML,/Motorcycle/);
+ assert.match(linked.elements['#modal-root'].innerHTML,/Preferred visit date/);
+ linked.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ const visitDate=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
+ linked.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'request-appointment'},values:{
+   shopId,bikeId:bike.data.id,service:'Oil Change from UI',date:visitDate,time:'10:30',notes:'Please inspect my bike'
+ }})}});
+ await wait(()=>linked.elements['#app'].innerHTML.includes('Oil Change from UI'));
+ assert.match(linked.elements['#app'].innerHTML,/Pending/);
+ assert.match(linked.elements['#app'].innerHTML,/CANCEL REQUEST/);
+ const created=(await send(base,'/api/rider-appointments','GET',undefined,rider.cookie)).data.appointments;
+ assert.equal(created.length,1);assert.equal(created[0].service,'Oil Change from UI');
+ assert.equal(created[0].status,'Pending');
+ const shopInbox=appSession(base,shop.cookie,'#/shop/appointments');
+ await wait(()=>shopInbox.elements['#app'].innerHTML.includes('Oil Change from UI'));
+ assert.match(shopInbox.elements['#app'].innerHTML,/Incoming Rider Requests/);
+ assert.match(shopInbox.elements['#app'].innerHTML,/Rider Test/);
+ assert.match(shopInbox.elements['#app'].innerHTML,/BOOK APPOINTMENT/);
+ linked.context.confirm=()=>true;
+ linked.listeners.click({target:{closest:()=>({dataset:{action:'cancel-rider-appointment',id:created[0].id}})}});
+ await wait(()=>linked.elements['#app'].innerHTML.includes('Cancelled'));
+ const cancelled=(await send(base,'/api/rider-appointments','GET',undefined,rider.cookie)).data.appointments;
+ assert.equal(cancelled[0].status,'Cancelled');
  const anonymous=appSession(base,'','#/rider/dashboard');
  await wait(()=>anonymous.location.hash==='#/login');
  assert.match(anonymous.elements['#app'].innerHTML,/System Login/);
