@@ -179,14 +179,33 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  assert.equal(created[0].status,'Pending');
  const shopInbox=appSession(base,shop.cookie,'#/shop/appointments');
  await wait(()=>shopInbox.elements['#app'].innerHTML.includes('Oil Change from UI'));
- assert.match(shopInbox.elements['#app'].innerHTML,/Incoming Rider Requests/);
+ assert.match(shopInbox.elements['#app'].innerHTML,/Rider Appointment Management/);
  assert.match(shopInbox.elements['#app'].innerHTML,/Rider Test/);
  assert.match(shopInbox.elements['#app'].innerHTML,/BOOK APPOINTMENT/);
- linked.context.confirm=()=>true;
- linked.listeners.click({target:{closest:()=>({dataset:{action:'cancel-rider-appointment',id:created[0].id}})}});
- await wait(()=>linked.elements['#app'].innerHTML.includes('Cancelled'));
+ assert.match(shopInbox.elements['#app'].innerHTML,/REVIEW REQUEST/);
+ shopInbox.listeners.click({target:{closest:()=>({dataset:{action:'review-rider-booking',id:created[0].id}})}});
+ assert.match(shopInbox.elements['#modal-root'].innerHTML,/Review Rider Request/);
+ assert.match(shopInbox.elements['#modal-root'].innerHTML,/Confirm Appointment/);
+ assert.match(shopInbox.elements['#modal-root'].innerHTML,/Decline Request/);
+ shopInbox.context.FormData=class{
+   constructor(form){this.values=Object.entries(form.values);}
+   entries(){return this.values[Symbol.iterator]();}
+ };
+ shopInbox.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'review-rider-booking',id:created[0].id},values:{
+   status:'Confirmed',reviewNote:'Please arrive ten minutes early'
+ }})}});
+ await wait(()=>shopInbox.elements['#app'].innerHTML.includes('Please arrive ten minutes early'));
+ assert.match(shopInbox.elements['#app'].innerHTML,/UPDATE STATUS/);
+ const confirmedRider=appSession(base,rider.cookie,'#/rider/bookings');
+ await wait(()=>confirmedRider.elements['#app'].innerHTML.includes('Please arrive ten minutes early'));
+ assert.match(confirmedRider.elements['#app'].innerHTML,/Confirmed/);
+ assert.match(confirmedRider.elements['#app'].innerHTML,/CANCEL BOOKING/);
+ confirmedRider.context.confirm=()=>true;
+ confirmedRider.listeners.click({target:{closest:()=>({dataset:{action:'cancel-rider-appointment',id:created[0].id}})}});
+ await wait(()=>confirmedRider.elements['#app'].innerHTML.includes('Cancelled'));
  const cancelled=(await send(base,'/api/rider-appointments','GET',undefined,rider.cookie)).data.appointments;
  assert.equal(cancelled[0].status,'Cancelled');
+ assert.equal(cancelled[0].reviewNote,'Please arrive ten minutes early');
  const anonymous=appSession(base,'','#/rider/dashboard');
  await wait(()=>anonymous.location.hash==='#/login');
  assert.match(anonymous.elements['#app'].innerHTML,/System Login/);
