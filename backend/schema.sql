@@ -129,3 +129,24 @@ ALTER TABLE services ADD COLUMN IF NOT EXISTS component_id TEXT REFERENCES compo
 CREATE INDEX IF NOT EXISTS services_component ON services(component_id);
 -- Prevent duplicate active components within the same motorcycle, regardless of letter case.
 CREATE UNIQUE INDEX IF NOT EXISTS components_unique_active_name ON components(bike_id,LOWER(name)) WHERE archived_at IS NULL;
+
+-- Phase 4.3: opt-in rider-created workshop appointment requests.
+-- Separate from legacy appointments, which require manual workshop customer records.
+CREATE TABLE IF NOT EXISTS rider_appointment_requests (
+ id TEXT PRIMARY KEY,
+ rider_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ shop_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ bike_id TEXT REFERENCES bikes(id) ON DELETE SET NULL,
+ bike_model TEXT NOT NULL,
+ service TEXT NOT NULL,
+ date TEXT NOT NULL,
+ time TEXT NOT NULL,
+ notes TEXT NOT NULL DEFAULT '',
+ status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Confirmed','Declined','Completed','Cancelled')),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS rider_requests_rider ON rider_appointment_requests(rider_id,date,time);
+CREATE INDEX IF NOT EXISTS rider_requests_shop ON rider_appointment_requests(shop_id,status,date,time);
+-- Idempotent double-submit protection (not a claim of workshop availability).
+CREATE UNIQUE INDEX IF NOT EXISTS rider_requests_unique_active_slot ON rider_appointment_requests(rider_id,shop_id,date,time) WHERE status IN ('Pending','Confirmed');

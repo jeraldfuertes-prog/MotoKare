@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, randomBytes, scrypt: scryptCallback, timingSafeEqual, createHash } = require('node:crypto');
 const { promisify } = require('node:util');
-const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows } = require('./db');
+const { pool, stmt, transaction, ready, getUser, bootstrap, bikeRows, componentRows, serviceRows, customerRows, jobRows, appointmentRows, shopRows, shopProfile, connectionRows, riderAppointmentRows } = require('./db');
 const scrypt=promisify(scryptCallback);
 const PORT=Number(process.env.PORT||3000);
 const HOST=process.env.HOST||'127.0.0.1';
@@ -288,6 +288,48 @@ async function api(req,res,url){
   }
   if(method==='DELETE'){await stmt('DELETE FROM jobs WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}
  }
+ // Phase 4.3: rider appointment requests, separated from shop-owned manual appointments.
+ if(path==='/api/rider-appointments'&&method==='GET'){
+  return send(res,200,{appointments:await riderAppointmentRows(user)});
+ }
+ if(path==='/api/rider-appointments'&&method==='POST'){
+  await requireUser(req,'rider');
+  const b=await body(req),shopId=text(b.shopId,'Workshop ID',64),bikeId=text(b.bikeId,'Motorcycle ID',64);
+  const service=text(b.service,'Requested service',100,{min:2}),d=date(b.date),t=time(b.time),
+   notes=text(b.notes??'','Booking notes',300,{min:0});
+  if(d<today())fail(400,'Choose today or a future appointment date');
+  if(d===today()){
+   const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+   if(t<=parts)fail(400,'Choose a future appointment time in Philippine time');
+  }
+  const id=randomUUID();
+  try{
+   await transaction(async tx=>{
+    const link=await tx('SELECT id FROM account_connections WHERE rider_id=? AND shop_id=? AND status=? FOR SHARE').get(user.id,shopId,'accepted');
+    if(!link)fail(403,'Connect with this workshop and get approval before requesting an appointment');
+    const bike=await tx('SELECT model FROM bikes WHERE id=? AND user_id=? FOR SHARE').get(bikeId,user.id);
+    if(!bike)fail(404,'Motorcycle not found');
+    const pending=await tx('SELECT COUNT(*)::int AS count FROM rider_appointment_requests WHERE rider_id=? AND status=?').get(user.id,'Pending');
+    if(pending.count>=20)fail(429,'You have reached the limit of 20 pending appointment requests');
+    await tx('INSERT INTO rider_appointment_requests(id,rider_id,shop_id,bike_id,bike_model,service,date,time,notes,status) VALUES(?,?,?,?,?,?,?,?,?,?)')
+     .run(id,user.id,shopId,bikeId,bike.model,service,d,t,notes,'Pending');
+   });
+  }catch(err){if(err.code==='23505')fail(409,'You already have an active request for that workshop at that date and time');throw err;}
+  return send(res,201,{id,status:'Pending'});
+ }
+ const riderBooking=path.match(/^\/api\/rider-appointments\/([^/]+)$/);
+ if(riderBooking&&method==='PATCH'){
+  await requireUser(req,'rider');const b=await body(req);
+  if(b.status!=='Cancelled')fail(400,'Riders can only cancel pending appointments');
+  const row=await stmt('UPDATE rider_appointment_requests SET status=?,updated_at=NOW() WHERE id=? AND rider_id=? AND status=? RETURNING id')
+   .get('Cancelled',riderBooking[1],user.id,'Pending');
+  if(!row){
+   const existing=await stmt('SELECT status FROM rider_appointment_requests WHERE id=? AND rider_id=?').get(riderBooking[1],user.id);
+   if(!existing)fail(404,'Appointment request not found');
+   fail(409,'Only pending appointment requests can be cancelled');
+  }
+  return send(res,200,{ok:true,status:'Cancelled'});
+ }
  if(path==='/api/appointments'&&method==='GET'){await requireUser(req,'shop');return send(res,200,{appointments:await appointmentRows(user.id)});}
  if(path==='/api/appointments'&&method==='POST'){
   await requireUser(req,'shop');const b=await body(req),customerId=await requireCustomer(b.customerId,user),id=randomUUID(),d=date(b.date),t=time(b.time);if(d<today())fail(400,'Choose today or a future appointment date');
@@ -306,7 +348,7 @@ async function api(req,res,url){
   if(method==='DELETE'){await stmt('DELETE FROM appointments WHERE id=? AND user_id=?').run(m[1],user.id);return send(res,200,{ok:true});}
  }
  if(path==='/api/notifications'&&method==='GET'){
-  if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');const requests=(await connectionRows(user)).filter(x=>x.status==='pending');return send(res,200,{notifications:[...pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date})),...requests.map(x=>({id:x.id,type:'connection',message:`${x.riderName} requested to connect with your workshop`}))]});}
+  if(user.role==='shop'){const pending=(await appointmentRows(user.id)).filter(x=>x.status==='Pending');const requests=(await connectionRows(user)).filter(x=>x.status==='pending');const riderRequests=(await riderAppointmentRows(user)).filter(x=>x.status==='Pending');return send(res,200,{notifications:[...pending.map(x=>({id:x.id,type:'appointment',message:`Appointment ${x.service} awaiting confirmation`,date:x.date})),...requests.map(x=>({id:x.id,type:'connection',message:`${x.riderName} requested to connect with your workshop`})),...riderRequests.map(x=>({id:x.id,type:'rider-appointment',message:`${x.riderName} requested ${x.service} on ${x.date} at ${x.time}`,date:x.date}))]});}
   const items=[];const bikes=await bikeRows(user.id);for(const b of bikes)for(const c of (await componentRows(user.id)).filter(c=>c.bikeId===b.id&&!c.archived)){const days=Math.round((Date.parse(c.dueDate+'T12:00:00Z')-Date.parse(today()+'T12:00:00Z'))/86400000);if(days<=14)items.push({id:c.id,bikeId:b.id,type:days<0?'overdue':'soon',message:`${c.name} on ${b.model} requires attention`,remainingDays:days,dueDate:c.dueDate});}
   return send(res,200,{notifications:items});
  }
