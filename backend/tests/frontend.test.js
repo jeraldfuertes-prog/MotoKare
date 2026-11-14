@@ -245,7 +245,7 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  reviewRider.listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{form:'review-service-report',id:submitted[0].id},values:{
    decision:'Accepted',componentId:''
  }})}});
- await wait(()=>reviewRider.elements['#app'].innerHTML.includes('IMPORTED'));
+ await wait(()=>reviewRider.elements['#toast-root'].innerHTML.includes('Workshop service imported into your history.'));
  assert.equal((await send(base,'/api/service-reports','GET',undefined,rider.cookie)).data.reports[0].status,'Accepted');
  assert.equal((await send(base,'/api/services','GET',undefined,rider.cookie)).data.services.some(x=>x.type==='Synthetic Oil Service'),true);
  assert.equal((await send(base,'/api/service-shares','GET',undefined,shop.cookie)).data.shares.length,0,'Import does not share unrelated rider history');
