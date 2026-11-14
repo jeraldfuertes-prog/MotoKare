@@ -60,6 +60,7 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  // Components upgrade: catalog/custom dialog HTML and real rider CRUD from UI.
  riderPage.location.hash='#/rider/components';riderPage.listeners.hashchange();
  assert.match(riderPage.elements['#app'].innerHTML,/ADD COMPONENT/);
+ assert.match(riderPage.elements['#app'].innerHTML,/class="ticker-copy" aria-hidden="true"/);
  assert.match(riderPage.elements['#app'].innerHTML,/Archived Components/);
  riderPage.listeners.click({target:{closest:()=>({dataset:{action:'add-component'}})}});
  assert.match(riderPage.elements['#modal-root'].innerHTML,/FROM CATALOG/);
@@ -304,6 +305,20 @@ test('frontend HTML rendering uses server sessions, role-specific pages and real
  const landing=appSession(base,'','#/');
  await wait(()=>landing.elements['#app'].innerHTML.includes('ENGINEERED FOR'));
  const nav=landing.elements['#app'].innerHTML;
+ // A repeated, accessible track supports a continuously left-scrolling ticker.
+ assert.ok(nav.includes('class="ticker-track"'));
+ assert.ok(nav.includes('class="ticker-copy"'));
+ assert.ok(nav.includes('class="ticker-copy" aria-hidden="true"'));
+ const tickerContent=nav.match(/<div class="ticker-copy">([\s\S]*?)<\/div><div class="ticker-copy" aria-hidden="true">([\s\S]*?)<\/div>/);
+ assert.ok(tickerContent,'Landing ticker should contain both identical copies');
+ assert.equal(tickerContent[1],tickerContent[2],'Copies must match for a seamless loop');
+ assert.match(tickerContent[1],/MOTOKARE \/\/ MAINTENANCE INTELLIGENCE/);
+ assert.match(tickerContent[1],/RIDE SMART\. MAINTAIN BETTER\./);
+ const tickerStyles=fs.readFileSync(path.join(__dirname,'../../frontend/styles.css'),'utf8');
+ assert.match(tickerStyles,/animation:ticker 36s linear infinite/);
+ assert.match(tickerStyles,/@keyframes ticker\{to\{transform:translateX\(-50%\)\}\}/);
+ assert.match(tickerStyles,/\.ticker:hover \.ticker-track/);
+ assert.match(tickerStyles,/\.ticker-copy\[aria-hidden="true"\]\{display:none\}/);
  const sections=[['Home','/','home'],['Features','/features','features'],["Who It's For",'/roles','roles'],['How It Works','/how','how'],['Pricing','/pricing','pricing']];
  for(const [label,route,section] of sections){
    assert.ok(nav.includes('href="#'+route+'" data-scroll="'+section+'"'),label+' must link to the correct section');

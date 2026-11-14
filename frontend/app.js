@@ -135,7 +135,19 @@
   const allAlerts=()=>state.bikes.flatMap(b=>alertsForBike(b));
   const totalCosts=bike=>state.services.filter(s=>s.bikeId===bike?.id).reduce((a,s)=>a+Number(s.cost||0),0);
   function toast(msg){clearTimeout(toastTimer);toastRoot.innerHTML=`<div class="toast">${icon('checkCircle')} ${esc(msg)}</div>`;toastTimer=setTimeout(()=>toastRoot.innerHTML='',3600);}
-  function ticker(){return `<div class="ticker" aria-label="MotoKare system information"><span class="ticker-track">MOTOKARE // MAINTENANCE INTELLIGENCE <span class="sep">✦</span> RIDER AND WORKSHOP SYSTEMS <span class="sep">✦</span> SCHEDULE-BASED TRACKING <span class="sep">✦</span> SECURE ACCOUNT DATA <span class="sep">✦</span> RIDE SMART. MAINTAIN BETTER.</span></div>`;}
+  function ticker(){
+    const messages=[
+      'MOTOKARE // MAINTENANCE INTELLIGENCE',
+      'RIDER AND WORKSHOP SYSTEMS',
+      'SCHEDULE-BASED TRACKING',
+      'SECURE ACCOUNT DATA',
+      'RIDE SMART. MAINTAIN BETTER.'
+    ];
+    const content=messages.map(message=>`<span class="ticker-item">${message}</span><span class="sep" aria-hidden="true">✦</span>`).join('');
+    // Two identical copies let the track wrap at -50% without disappearing or jumping.
+    // The duplicate is decorative and hidden from assistive technology.
+    return `<div class="ticker" aria-label="MotoKare system information"><div class="ticker-track"><div class="ticker-copy">${content}</div><div class="ticker-copy" aria-hidden="true">${content}</div></div></div>`;
+  }
   function landingHeader(){return `<header class="site-header"><div class="container nav-inner">${logo()}<nav class="nav-links" id="site-nav" aria-label="Main navigation"><a href="#/" data-scroll="home">Home</a><a href="#/features" data-scroll="features">Features</a><a href="#/roles" data-scroll="roles">Who It's For</a><a href="#/how" data-scroll="how">How It Works</a><a href="#/pricing" data-scroll="pricing">Pricing</a></nav><div class="nav-actions"><a class="button ghost small" href="#/login">Log In</a><a class="button small primary" href="#/register">Get Started ${icon('arrow')}</a><button class="nav-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-action="mobile-nav">${icon('menu')}</button></div></div></header>`;}
   function landing(){
     const features=[['calendar','Maintenance Scheduling','Stay ahead of oil changes, brake checks, and service intervals with one digital schedule.'],['bell','Intelligent Reminders','Get clear service-due indicators based on recorded dates and odometer readings.'],['history','Service History','Maintain an organized timeline of past servicing, repair expenses, and workshops.'],['calendar','Date-Based Tracking','See upcoming service dates and remaining days without entering odometer readings.'],['store','Repair Shop Workspace','Keep customer records, manage service jobs, and plan upcoming appointments.'],['chart','Maintenance Reports','See historical service activity and cost summaries in a streamlined dashboard.']];
