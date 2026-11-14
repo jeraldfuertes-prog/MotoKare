@@ -131,16 +131,18 @@ async function api(req,res,url){
   const id=randomUUID();
   try{await stmt('INSERT INTO account_connections(id,rider_id,shop_id,status) VALUES(?,?,?,?)').run(id,user.id,shop.id,'pending');}
   catch(err){if(err.code==='23505')fail(409,'A connection request to this workshop already exists');throw err;}
+  await notify(shop.id,'connection-request',`${user.name} requested to connect with your workshop`,'/shop/connections');
   return send(res,201,{id,status:'pending'});
  }
  const link=path.match(/^\/api\/connections\/([0-9a-f-]+)$/);
  if(link&&method==='PATCH'){
   await requireUser(req,'shop');const b=await body(req),decision=status(b.status,['accepted','declined']);
-  const existing=await stmt('SELECT id,status FROM account_connections WHERE id=? AND shop_id=?').get(link[1],user.id);
+  const existing=await stmt('SELECT id,status,rider_id AS "riderId" FROM account_connections WHERE id=? AND shop_id=?').get(link[1],user.id);
   if(!existing)fail(404,'Connection request not found');
   if(existing.status!=='pending')fail(409,'Only pending requests can be reviewed');
   const updated=await stmt('UPDATE account_connections SET status=?,updated_at=NOW() WHERE id=? AND shop_id=? AND status=? RETURNING id').get(decision,link[1],user.id,'pending');
   if(!updated)fail(409,'This connection request was already reviewed');
+  await notify(existing.riderId,'connection-decision',`${user.shopName} ${decision} your connection request`,'/rider/connections');
   return send(res,200,{ok:true,status:decision});
  }
  if(link&&method==='DELETE'){
@@ -151,6 +153,9 @@ async function api(req,res,url){
    // Revocation is permanent for shared individual records, even if the accounts reconnect later.
    await tx('DELETE FROM rider_service_shares WHERE rider_id=? AND shop_id=?').run(conn.riderId,conn.shopId);
    await tx('DELETE FROM account_connections WHERE id=? AND '+ownership+'=?').run(link[1],user.id);
+   const recipient=user.role==='rider'?conn.shopId:conn.riderId;
+   await notify(recipient,'connection-ended','An account connection ended; previously shared records are no longer accessible',
+    user.role==='rider'?'/shop/connections':'/rider/connections',tx);
   });
   return send(res,200,{ok:true});
  }
@@ -437,6 +442,7 @@ async function api(req,res,url){
     if(pending.count>=20)fail(429,'You have reached the limit of 20 pending appointment requests');
     await tx('INSERT INTO rider_appointment_requests(id,rider_id,shop_id,bike_id,bike_model,service,date,time,notes,status) VALUES(?,?,?,?,?,?,?,?,?,?)')
      .run(id,user.id,shopId,bikeId,bike.model,service,d,t,notes,'Pending');
+    await notify(shopId,'appointment-request',`${user.name} requested ${service} on ${d} at ${t}`,'/shop/appointments',tx);
    });
   }catch(err){if(err.code==='23505')fail(409,'You already have an active request for that workshop at that date and time');throw err;}
   return send(res,201,{id,status:'Pending'});
@@ -446,13 +452,14 @@ async function api(req,res,url){
   const b=await body(req);
   if(user.role==='rider'){
    if(b.status!=='Cancelled')fail(400,'Riders may only cancel their own appointments');
-   const row=await stmt('UPDATE rider_appointment_requests SET status=?,updated_at=NOW() WHERE id=? AND rider_id=? AND status IN (?,?) RETURNING id')
+   const row=await stmt('UPDATE rider_appointment_requests SET status=?,updated_at=NOW() WHERE id=? AND rider_id=? AND status IN (?,?) RETURNING shop_id AS "shopId",service')
     .get('Cancelled',riderBooking[1],user.id,'Pending','Confirmed');
    if(!row){
     const existing=await stmt('SELECT status FROM rider_appointment_requests WHERE id=? AND rider_id=?').get(riderBooking[1],user.id);
     if(!existing)fail(404,'Appointment request not found');
     fail(409,'Only pending or confirmed appointments can be cancelled');
    }
+   await notify(row.shopId,'appointment-cancelled',`${user.name} cancelled the ${row.service} appointment`,'/shop/appointments');
    return send(res,200,{ok:true,status:'Cancelled'});
   }
   await requireUser(req,'shop');
@@ -462,7 +469,7 @@ async function api(req,res,url){
    await transaction(async tx=>{
     // Serialize the shop's exact-time confirmations across rider and manual booking flows.
     await tx('SELECT id FROM users WHERE id=? AND role=? FOR UPDATE').get(user.id,'shop');
-    const request=await tx('SELECT rider_id AS "riderId",status,date,time FROM rider_appointment_requests WHERE id=? AND shop_id=? FOR UPDATE').get(riderBooking[1],user.id);
+    const request=await tx('SELECT rider_id AS "riderId",service,status,date,time FROM rider_appointment_requests WHERE id=? AND shop_id=? FOR UPDATE').get(riderBooking[1],user.id);
     if(!request)fail(404,'Appointment request not found');
     if(!(request.status==='Pending'&&['Confirmed','Declined'].includes(to))&&
        !(request.status==='Confirmed'&&['Completed','Cancelled'].includes(to)))
@@ -486,6 +493,7 @@ async function api(req,res,url){
     }
     await tx('UPDATE rider_appointment_requests SET status=?,review_note=?,reviewed_at=NOW(),updated_at=NOW() WHERE id=? AND shop_id=?')
      .run(to,note,riderBooking[1],user.id);
+    await notify(request.riderId,'appointment-update',`${user.shopName} marked your ${request.service} appointment ${to.toLowerCase()}`,'/rider/bookings',tx);
    });
   }catch(err){
    if(err.code==='23505')fail(409,'This time slot is already confirmed for another rider. Decline this request or ask the rider to choose a different time');
