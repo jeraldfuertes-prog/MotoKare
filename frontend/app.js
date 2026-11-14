@@ -74,7 +74,7 @@
     {name:'Tire Inspection',icon:'target',interval:4700,last:10000,days:65}
   ];
   let state = {version:4, session:null, role:'rider', selectedBike:null,
-    bikes:[], components:[], componentCatalog:[], services:[], customers:[], jobs:[], appointments:[], riderAppointments:[], serviceReports:[], serviceShares:[], shops:[], connections:[], shopProfile:null,
+    bikes:[], components:[], componentCatalog:[], services:[], customers:[], jobs:[], appointments:[], riderAppointments:[], serviceReports:[], serviceShares:[], notificationInbox:[], notificationUnreadCount:0, shops:[], connections:[], shopProfile:null,
     settings:{shopName:'',notifications:true,distance:'km'}};
   let loaded = false;
   async function api(endpoint, method='GET', data){
@@ -106,8 +106,8 @@
   }
   function save(){try{if(state.selectedBike)localStorage.setItem(SELECTION_KEY,state.selectedBike);}catch{}}
   let route='', mobileOpen=false, notifyOpen=false, toastTimer;
-  const routesRider=[['dashboard','Dashboard','dashboard'],['motorcycles','My Motorcycles','bike'],['components','Components','settings'],['maintenance','Maintenance','calendar'],['history','Service History','history'],['records','Shared Records','history'],['connections','Repair Shops','store'],['bookings','My Bookings','calendar'],['settings','Settings','settings']];
-  const routesShop=[['dashboard','Shop Dashboard','dashboard'],['customers','Customers','users'],['jobs','Service Jobs','wrench'],['appointments','Appointments','calendar'],['reports','Reports','chart'],['records','Shared Records','history'],['connections','Rider Connections','users'],['settings','Settings','settings']];
+  const routesRider=[['dashboard','Dashboard','dashboard'],['motorcycles','My Motorcycles','bike'],['components','Components','settings'],['maintenance','Maintenance','calendar'],['history','Service History','history'],['records','Shared Records','history'],['connections','Repair Shops','store'],['bookings','My Bookings','calendar'],['notifications','Notifications','bell'],['settings','Settings','settings']];
+  const routesShop=[['dashboard','Shop Dashboard','dashboard'],['customers','Customers','users'],['jobs','Service Jobs','wrench'],['appointments','Appointments','calendar'],['reports','Reports','chart'],['records','Shared Records','history'],['connections','Rider Connections','users'],['notifications','Notifications','bell'],['settings','Settings','settings']];
   const routeNow=()=> (location.hash.slice(1).split('?')[0] || '/');
   const parseAppRoute = path => {const a=path.split('/').filter(Boolean);return {role:a[0]==='shop'?'shop':'rider',page:a[1]||'dashboard'};};
   function navigate(path){location.hash='#'+path; if(routeNow()===path) render();}
@@ -138,9 +138,9 @@
     </main><footer class="site-footer"><div class="container footer-inner">${logo()}<span>© ${now.getFullYear()} MotoKare • Ride Smart. Maintain Better.</span><span>PHASE 03 // FULL-STACK WEB APP</span></div></footer>`;
   }
   function authPage(mode){const register=mode==='register'; const role=state.role==='shop'?'shop':'rider';return `<main id="main" class="auth-shell"><section class="auth-promo">${logo()}<div><div class="kicker"><span class="status-dot"></span> SYSTEM ACCESS // SECURE ACCOUNT LOGIN</div><h1>${register?'JOIN THE<br><span>NETWORK.</span>':'WELCOME<br><span>BACK.</span>'}</h1><p>Everything you need to track motorcycle care, maintain service records, and connect riders with repair shops. Enter your MotoKare workspace.</p>${blueprint('blueprint-mini')}</div><div class="auth-foot"><span>MOTOKARE // AUTH MODULE</span><span>ENCRYPTED PASSWORD STORAGE • HTTP-ONLY SESSIONS</span></div></section><section class="auth-main"><div class="auth-card"><a class="auth-back" href="#/">${icon('left')} RETURN TO HOMEPAGE</a><div class="label" style="margin-top:39px">ACCESS TERMINAL // ${register?'REGISTER':'LOGIN'}</div><h2>${register?'Create Account':'System Login'}</h2><p class="auth-sub">${register?'Select an account type and set up your workspace.':'Select your access type to enter your dashboard.'}</p><div class="auth-notice">${icon('shield')} Account access is verified by the MotoKare server. Use a unique password of at least 10 characters.</div><form data-form="${register?'register':'login'}" id="auth-form"><div class="label" style="margin-bottom:10px">SELECT ACCESS MODE</div><div class="tabs" role="group" aria-label="Account type"><button type="button" class="tab ${role==='rider'?'active':''}" aria-pressed="${role==='rider'}" data-action="auth-role" data-role="rider">${icon('bike')} RIDER / B2C</button><button type="button" class="tab ${role==='shop'?'active':''}" aria-pressed="${role==='shop'}" data-action="auth-role" data-role="shop">${icon('store')} WORKSHOP / B2B</button></div>${register?`<div class="field"><label for="full-name">Full name</label><input id="full-name" name="fullName" autocomplete="name" placeholder="Your full name" minlength="2" required></div>`:''}<div class="field"><label for="auth-email">Email address</label><input id="auth-email" name="email" type="email" autocomplete="email" placeholder="name@example.com" required></div><div class="field"><label for="auth-password">${register?'Create password':'Password'}</label><input id="auth-password" name="password" type="password" autocomplete="${register?'new-password':'current-password'}" placeholder="At least 10 characters" minlength="10" required></div>${register&&role==='shop'?`<div class="field"><label for="shop-name">Workshop name</label><input id="shop-name" name="shopName" placeholder="e.g. MotoKare Service Hub" required></div>`:''}<button class="button primary full" type="submit">${register?'CREATE ACCOUNT':'ENTER DASHBOARD'} ${icon('arrow')}</button></form><p class="auth-helper">${register?'Already have an account?':'New to MotoKare?'} <a href="#/${register?'login':'register'}">${register?'Log in':'Create account'}</a></p><div class="auth-helper">Your account determines which workspace and data you can access.</div></div></section></main>`;}
-  function sidebar(role,page){const items=role==='shop'?routesShop:routesRider;return `<aside class="sidebar ${mobileOpen?'open':''}" id="app-sidebar" aria-label="${role==='shop'?'Workshop':'Rider'} navigation">${logo()}<div><div class="side-caption">${role==='shop'?'WORKSHOP OPERATIONS':'RIDER CONTROL CENTER'}</div><nav class="side-nav" aria-label="Dashboard sections"><div class="nav-group">Main Menu // 01</div>${items.map(([id,name,ic])=>`<a href="#/${role}/${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}>${icon(ic)} ${name}</a>`).join('')}</nav></div><div class="sidebar-spacer"></div><button type="button" class="side-switch" data-action="switch-role" data-role="${role==='shop'?'rider':'shop'}" aria-label="Sign out and switch account type"><span><small>SWITCH ACCOUNT</small><strong>${role==='shop'?'Rider Dashboard':'Repair Shop Dashboard'}</strong></span>${icon('arrow')}</button><button class="button ghost small full" type="button" data-action="logout">${icon('logout')} EXIT TO HOME</button><div class="side-foot">PHASE 04.5 // RECORD SHARING</div></aside>`;}
+  function sidebar(role,page){const items=role==='shop'?routesShop:routesRider;return `<aside class="sidebar ${mobileOpen?'open':''}" id="app-sidebar" aria-label="${role==='shop'?'Workshop':'Rider'} navigation">${logo()}<div><div class="side-caption">${role==='shop'?'WORKSHOP OPERATIONS':'RIDER CONTROL CENTER'}</div><nav class="side-nav" aria-label="Dashboard sections"><div class="nav-group">Main Menu // 01</div>${items.map(([id,name,ic])=>`<a href="#/${role}/${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}>${icon(ic)} ${name}</a>`).join('')}</nav></div><div class="sidebar-spacer"></div><button type="button" class="side-switch" data-action="switch-role" data-role="${role==='shop'?'rider':'shop'}" aria-label="Sign out and switch account type"><span><small>SWITCH ACCOUNT</small><strong>${role==='shop'?'Rider Dashboard':'Repair Shop Dashboard'}</strong></span>${icon('arrow')}</button><button class="button ghost small full" type="button" data-action="logout">${icon('logout')} EXIT TO HOME</button><div class="side-foot">PHASE 04.6 // NOTIFICATIONS</div></aside>`;}
   function breadcrumb(page){return page.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
-  function topbar(role,page){const count=role==='shop'?state.appointments.filter(x=>x.status==='Pending').length+state.connections.filter(x=>x.status==='pending').length+state.riderAppointments.filter(x=>x.status==='Pending').length:allAlerts().length+state.serviceReports.filter(x=>x.status==='Pending').length;return `<header class="app-topbar"><div style="display:flex;align-items:center;gap:15px"><button class="icon-button sidebar-mobile-toggle" type="button" data-action="sidebar-toggle" aria-label="Open sidebar navigation" aria-expanded="${mobileOpen}">${icon('menu')}</button><div class="breadcrumbs">MOTOKARE / <span>${role==='shop'?'WORKSHOP':'RIDER'} / ${esc(breadcrumb(page))}</span></div></div><div class="topbar-actions"><span class="system-status"><span class="status-dot ok"></span> SECURE SESSION ACTIVE</span><button class="icon-button" type="button" data-action="notifications" aria-label="View notifications" aria-expanded="${notifyOpen}">${icon('bell')}${count?`<span class="notify-count">${count>9?'9+':count}</span>`:''}</button><div class="top-avatar" aria-hidden="true">${esc((state.session?.name||'MK').slice(0,2).toUpperCase())}</div><div class="top-user">${esc(state.session?.name||'Demo Operator')}<small>${role==='shop'?'WORKSHOP MODE':'RIDER MODE'}</small></div></div></header>`;}
+  function topbar(role,page){const count=(role==='shop'?state.appointments.filter(x=>x.status==='Pending').length+state.connections.filter(x=>x.status==='pending').length+state.riderAppointments.filter(x=>x.status==='Pending').length:allAlerts().length+state.serviceReports.filter(x=>x.status==='Pending').length)+(state.notificationUnreadCount||0);return `<header class="app-topbar"><div style="display:flex;align-items:center;gap:15px"><button class="icon-button sidebar-mobile-toggle" type="button" data-action="sidebar-toggle" aria-label="Open sidebar navigation" aria-expanded="${mobileOpen}">${icon('menu')}</button><div class="breadcrumbs">MOTOKARE / <span>${role==='shop'?'WORKSHOP':'RIDER'} / ${esc(breadcrumb(page))}</span></div></div><div class="topbar-actions"><span class="system-status"><span class="status-dot ok"></span> SECURE SESSION ACTIVE</span><button class="icon-button" type="button" data-action="notifications" aria-label="View notifications" aria-expanded="${notifyOpen}">${icon('bell')}${count?`<span class="notify-count">${count>9?'9+':count}</span>`:''}</button><div class="top-avatar" aria-hidden="true">${esc((state.session?.name||'MK').slice(0,2).toUpperCase())}</div><div class="top-user">${esc(state.session?.name||'Demo Operator')}<small>${role==='shop'?'WORKSHOP MODE':'RIDER MODE'}</small></div></div></header>`;}
   function appShell(role,page,content){document.body.classList.toggle('app-mode',true);return `<div class="app-layout">${sidebar(role,page)}<div class="mobile-shade ${mobileOpen?'show':''}" data-action="sidebar-close"></div><div class="app-body">${topbar(role,page)}${ticker()}<main id="main" class="app-content">${content}</main></div></div>`;}
   const head=(tag,title,desc,buttons='')=>`<header class="page-head"><div><div class="label">${tag}</div><h1>${title}</h1><p>${desc}</p></div>${buttons?`<div class="page-actions">${buttons}</div>`:''}</header>`;
   const button=(action,title,ic='plus',primary=true)=>`<button type="button" class="button ${primary?'primary':''} small" data-action="${action}">${icon(ic)} ${title}</button>`;
@@ -358,8 +358,76 @@
       '<button class="button primary" type="submit">'+icon('check')+' SAVE WORKSHOP LISTING</button></form></section>';
   }
   function settingsPage(role){return `${head('SYSTEM // USER PREFERENCES','Settings','Manage your secure MotoKare account.')}${role==='shop'?shopProfileSettings():''}<div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="label">USER PARAMETERS</div><h2>Profile Settings</h2></div></div><form data-form="settings"><div class="field"><label for="settings-name">Display name</label><input name="name" id="settings-name" value="${esc(state.session?.name||'')}" minlength="2" required></div><div class="field"><label for="settings-email">Email address</label><input name="email" id="settings-email" value="${esc(state.session?.email||'')}" type="email" required></div>${role==='shop'?`<div class="field"><label for="settings-shop">Workshop name</label><input name="shopName" id="settings-shop" value="${esc(state.settings.shopName)}" required></div>`:''}<button class="button primary" type="submit">${icon('check')} SAVE SETTINGS</button></form></section><section class="panel"><div class="panel-head"><div><div class="label">ACCOUNT SECURITY</div><h2>Change Password</h2></div></div><form data-form="password"><div class="field"><label for="pw-current">Current password</label><input id="pw-current" name="currentPassword" type="password" autocomplete="current-password" required></div><div class="field"><label for="pw-new">New password (10+ characters)</label><input id="pw-new" name="newPassword" type="password" autocomplete="new-password" minlength="10" required></div><button type="submit" class="button">${icon('shield')} CHANGE PASSWORD</button></form><div style="border-top:1px solid var(--line-soft);margin-top:25px;padding-top:20px"><span class="pill good">SERVER DATABASE CONNECTED</span><p style="color:#95BBCB;font-size:11px;margin-top:12px">Your account records are stored in PostgreSQL and protected by server-side permissions. Service reminders appear inside MotoKare; email/SMS delivery has not been configured.</p></div></section></div>`;}
-  function notifications(){if(!notifyOpen)return '';const a=state.role==='shop'?[...state.appointments.filter(x=>x.status==='Pending').map(x=>`${esc(customerName(x.customerId))}: appointment awaiting confirmation.`),...state.connections.filter(x=>x.status==='pending').map(x=>`${esc(x.riderName)} requested a workshop connection.`),...state.riderAppointments.filter(x=>x.status==='Pending').map(x=>`${esc(x.riderName)} requested ${esc(x.service)} on ${esc(x.date)} at ${esc(x.time)}.`)]:[...allAlerts().slice(0,6).map(x=>`${esc(x.c.name)}: ${x.label.toLowerCase()} (${remainingLabel(x.days)}).`),...state.serviceReports.filter(x=>x.status==='Pending').map(x=>`${esc(x.shopName)} submitted a service report for ${esc(x.bikeModel)}. Review it in Shared Records.`)];return `<aside class="notify-panel" role="dialog" aria-label="Notifications" aria-modal="false"><div class="label">SYSTEM NOTIFICATIONS</div><h3>Attention Queue</h3>${a.length?a.map(x=>`<p>${x}</p>`).join(''):'<div class="notification-empty">No alerts. Everything looks on track.</div>'}</aside>`;}
-  function render(){route=routeNow();if(!loaded){app.innerHTML='<main class="container" style="padding:8rem 1rem"><div class="label">CONNECTING TO MOTOKARE SERVER...</div></main>';return;}if(route.startsWith('/rider/')||route.startsWith('/shop/')){if(!state.session){navigate('/login');return;}const role=parseAppRoute(route).role;if(role!==state.session.mode){navigate('/'+state.session.mode+'/dashboard');return;}}document.body.classList.remove('app-mode');let content;if(route==='/'||route==='/home')content=landing();else if(route==='/login'||route==='/register')content=authPage(route.slice(1));else{const {role,page}=parseAppRoute(route),valid=(role==='rider'?routesRider:routesShop).map(x=>x[0]);if(!valid.includes(page)){navigate('/');return;}const contentMap=role==='rider'?{dashboard:riderDash,motorcycles:motorcyclesPage,components:componentsPage,maintenance:maintenancePage,history:historyPage,connections:()=>connectionsPage('rider'),bookings:bookingsPage,records:()=>sharedRecordsPage('rider'),settings:()=>settingsPage('rider')}:{dashboard:shopDash,customers:customersPage,jobs:jobsPage,appointments:appointmentsPage,reports:reportsPage,connections:()=>connectionsPage('shop'),records:()=>sharedRecordsPage('shop'),settings:()=>settingsPage('shop')};content=appShell(role,page,contentMap[page]());}
+  const notificationDate=value=>{
+    const d=new Date(value);
+    return Number.isNaN(d.getTime())?'Recently':d.toLocaleString('en-PH',{
+      timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'
+    });
+  };
+  function notificationCard(item,compact=false){
+    const unread=!item.readAt;
+    return '<article class="inbox-item '+(unread?'is-unread':'is-read')+'">'+
+      '<div class="inbox-state">'+(unread?'<span class="status-dot ok"></span>':icon('checkCircle'))+'</div>'+
+      '<div class="inbox-content"><div class="inbox-meta"><span class="label">'+esc(item.type.replaceAll('-',' '))+'</span>'+
+      '<time>'+esc(notificationDate(item.createdAt))+'</time></div><p>'+esc(item.message)+'</p>'+
+      '<div class="inbox-item-actions">'+
+      '<button type="button" class="button small primary" data-action="notification-open" data-id="'+esc(item.id)+'">OPEN</button>'+
+      '<button type="button" class="button small ghost" data-action="notification-toggle-read" data-id="'+esc(item.id)+'">'+
+        (unread?'MARK READ':'MARK UNREAD')+'</button>'+
+      (!compact?'<button type="button" class="button small ghost" data-action="notification-dismiss" data-id="'+esc(item.id)+'">DISMISS</button>':'')+
+      '</div></div></article>';
+  }
+  function attentionItems(){
+    if(state.role==='shop'){
+      return [...state.appointments.filter(a=>a.status==='Pending').map(a=>({
+        label:'Manual appointment awaiting confirmation: '+a.service,route:'/shop/appointments'
+      })),...state.connections.filter(c=>c.status==='pending').map(c=>({
+        label:c.riderName+' requested to connect with the workshop',route:'/shop/connections'
+      })),...state.riderAppointments.filter(b=>b.status==='Pending').map(b=>({
+        label:b.riderName+' requested '+b.service+' on '+b.date,route:'/shop/appointments'
+      }))];
+    }
+    return [...allAlerts().map(a=>({
+      label:a.c.name+': '+a.label.toLowerCase()+' ('+remainingLabel(a.days)+')',route:'/rider/maintenance'
+    })),...state.serviceReports.filter(r=>r.status==='Pending').map(r=>({
+      label:r.shopName+' sent a service report awaiting your decision',route:'/rider/records'
+    }))];
+  }
+  function attentionList(max=12){
+    const items=attentionItems().slice(0,max);
+    return items.length?'<div class="inbox-attention">'+items.map(x=>
+      '<a href="#'+esc(x.route)+'" class="inbox-attention-link">'+icon('alert')+' <span>'+esc(x.label)+'</span></a>'
+    ).join('')+'</div>':'<div class="notification-empty">No pending tasks or service reminders.</div>';
+  }
+  function notificationPage(){
+    const inbox=state.notificationInbox||[],unread=state.notificationUnreadCount||0;
+    return head('SYSTEM // PRIVATE ACTIVITY FEED','Notifications','View account-specific updates and keep track of unread activity.')+
+      '<div class="alert-strip">'+icon('shield')+
+      ' Notifications are saved in your account. Service reminders and open tasks are listed separately and may stay visible until their underlying task is resolved. No SMS, email or push notification delivery is configured.</div>'+
+      '<div class="booking-kpis">'+metric('UNREAD ACTIVITY',String(unread),'UPDATES','bell')+
+      metric('RECENT EVENTS',String(inbox.length),'SHOWN','history')+
+      metric('OPEN TASKS',String(attentionItems().length),'ACTION ITEMS','alert')+'</div>'+
+      '<section class="panel notification-section"><div class="panel-head"><div><div class="label">ACCOUNT HISTORY // MOST RECENT FIRST</div><h2>Activity Inbox</h2></div>'+
+      (unread?'<button type="button" class="button small ghost" data-action="notification-read-all">MARK ALL READ</button>':'')+'</div>'+
+      (inbox.length?'<div class="inbox-list">'+inbox.map(n=>notificationCard(n)).join('')+'</div>':
+       '<div class="empty-state"><h3>No activity updates yet</h3><p>Connection, booking, and service-sharing events will appear here.</p></div>')+'</section>'+
+      '<section class="panel notification-section"><div class="panel-head"><div><div class="label">CURRENT ATTENTION QUEUE</div><h2>Reminders & Pending Tasks</h2></div></div>'+
+      attentionList(50)+'</section>';
+  }
+  function notifications(){
+    if(!notifyOpen)return '';
+    const inbox=(state.notificationInbox||[]).slice(0,4),unread=state.notificationUnreadCount||0;
+    return '<aside class="notify-panel" role="dialog" aria-label="Notifications" aria-modal="false">'+
+      '<div class="inbox-pop-head"><div><div class="label">ACCOUNT ACTIVITY</div><h3>Notifications</h3><small>'+
+      unread+' unread update'+(unread===1?'':'s')+'</small></div>'+
+      (unread?'<button type="button" class="button small ghost" data-action="notification-read-all">MARK ALL READ</button>':'')+'</div>'+
+      (inbox.length?'<div class="inbox-list inbox-list-compact">'+inbox.map(n=>notificationCard(n,true)).join('')+'</div>':
+       '<div class="notification-empty">No saved account updates yet.</div>')+
+      '<div class="inbox-pop-foot"><a class="button small ghost" href="#/'+esc(state.role)+'/notifications">VIEW ALL NOTIFICATIONS</a></div>'+
+      '<div class="inbox-queue-label label">ACTION REQUIRED / DATE REMINDERS</div>'+attentionList(5)+'</aside>';
+  }
+
+  function render(){route=routeNow();if(!loaded){app.innerHTML='<main class="container" style="padding:8rem 1rem"><div class="label">CONNECTING TO MOTOKARE SERVER...</div></main>';return;}if(route.startsWith('/rider/')||route.startsWith('/shop/')){if(!state.session){navigate('/login');return;}const role=parseAppRoute(route).role;if(role!==state.session.mode){navigate('/'+state.session.mode+'/dashboard');return;}}document.body.classList.remove('app-mode');let content;if(route==='/'||route==='/home')content=landing();else if(route==='/login'||route==='/register')content=authPage(route.slice(1));else{const {role,page}=parseAppRoute(route),valid=(role==='rider'?routesRider:routesShop).map(x=>x[0]);if(!valid.includes(page)){navigate('/');return;}const contentMap=role==='rider'?{dashboard:riderDash,motorcycles:motorcyclesPage,components:componentsPage,maintenance:maintenancePage,history:historyPage,connections:()=>connectionsPage('rider'),bookings:bookingsPage,records:()=>sharedRecordsPage('rider'),notifications:notificationPage,settings:()=>settingsPage('rider')}:{dashboard:shopDash,customers:customersPage,jobs:jobsPage,appointments:appointmentsPage,reports:reportsPage,connections:()=>connectionsPage('shop'),records:()=>sharedRecordsPage('shop'),notifications:notificationPage,settings:()=>settingsPage('shop')};content=appShell(role,page,contentMap[page]());}
     app.innerHTML=content + notifications();document.title=`MotoKare | ${route==='/'?'Ride Smart. Maintain Better.':route==='/login'?'Log In':route==='/register'?'Register':breadcrumb(route.split('/').pop())}`;
     // Move keyboard focus only after route navigation initiated by user; avoid auto-scrolling on initial load.
   }
@@ -602,6 +670,27 @@
     if(a==='auth-role'){state.role=el.dataset.role;render();return;}
     if(a==='switch-role'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;state.role=el.dataset.role;mobileOpen=false;notifyOpen=false;navigate('/login');toast('Sign in with a '+(state.role==='shop'?'workshop':'rider')+' account to switch.');}catch(error){toast(error.message);}return;}
     if(a==='notifications'){notifyOpen=!notifyOpen;render();return;}
+    if(a==='notification-read-all'){
+      await persist('/notification-inbox/read-all','POST',{},'All activity notifications marked read.',{close:false});return;
+    }
+    if(a==='notification-open'||a==='notification-toggle-read'||a==='notification-dismiss'){
+      const item=(state.notificationInbox||[]).find(n=>n.id===id);
+      if(!item)return toast('Notification no longer available.');
+      if(a==='notification-dismiss'){
+        if(!confirm('Dismiss this activity notification?'))return;
+        await persist('/notification-inbox/'+encodeURIComponent(id),'DELETE',undefined,'Notification dismissed.',{close:false});return;
+      }
+      try{
+        if(a==='notification-open'){
+          if(!item.readAt)await api('/notification-inbox/'+encodeURIComponent(id),'PATCH',{read:true});
+          notifyOpen=false;await refresh();
+          if(item.route.startsWith('/'+state.role+'/'))navigate(item.route);
+        }else{
+          await persist('/notification-inbox/'+encodeURIComponent(id),'PATCH',{read:!!item.readAt},
+            item.readAt?'Notification marked unread.':'Notification marked read.',{close:false});
+        }
+      }catch(err){toast(err.message);}return;
+    }
     if(a==='logout'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;mobileOpen=false;notifyOpen=false;navigate('/');toast('Signed out successfully.');}catch(error){toast(error.message);}return;}
     if(['add-bike','edit-bike','add-component','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment','request-appointment','review-rider-booking','submit-service-report','review-service-report','share-service'].includes(a)){openModal(a,id);return;}
     if(a==='archive-component'||a==='restore-component'){
@@ -656,6 +745,21 @@
   const checkCalendarDate=()=>{const date=today();if(date!==visibleDay){visibleDay=date;if(loaded)render();}};
   window.addEventListener('focus',checkCalendarDate);
   document.addEventListener('visibilitychange',checkCalendarDate);
-  if(typeof window.setInterval==='function')window.setInterval(checkCalendarDate,60000);
+  if(typeof window.setInterval==='function'){
+    window.setInterval(checkCalendarDate,60000);
+    // Foreground polling only: updates are fetched while MotoKare is open, not via push.
+    window.setInterval(async()=>{
+      if(!state.session||document.visibilityState==='hidden')return;
+      try{
+        const data=await api('/notification-inbox');
+        const unchanged=(state.notificationUnreadCount===data.unreadCount)&&
+          (state.notificationInbox?.[0]?.id===data.notifications?.[0]?.id)&&
+          (state.notificationInbox?.[0]?.readAt===data.notifications?.[0]?.readAt);
+        if(unchanged)return;
+        state.notificationInbox=data.notifications;state.notificationUnreadCount=data.unreadCount;
+        render();
+      }catch{/* Session, network, or server errors are handled on the next normal refresh. */}
+    },60000);
+  }
   initialize();
 })();
