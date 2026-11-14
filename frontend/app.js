@@ -428,6 +428,57 @@
         '<p class="text-muted">A confirmed appointment occupies this exact workshop date and time. Other requests at this time will need different arrangements.</p>';
       submit='SAVE DECISION';
     }
+    else if(type==='submit-service-report'){
+      record=state.riderAppointments.find(x=>x.id===id);
+      if(!record||record.status!=='Completed')return toast('Complete the rider appointment before submitting a report.');
+      if(state.serviceReports.some(x=>x.appointmentId===id))return toast('A service report has already been submitted for this booking.');
+      title='Submit Service Report';
+      subtitle='This report will be sent to '+record.riderName+' for review. It will NOT be added to their private history unless they accept it.';
+      fields='<p class="booking-review-note">'+esc(record.bikeModel)+' · Appointment '+niceDate(record.date)+'</p>'+
+        field('service','Work performed','text',record.service,'minlength="2" maxlength="100" required')+
+        '<div class="form-grid">'+field('serviceDate','Actual service date','date',today(),`min="${record.date}" max="${today()}" required`)+
+        field('cost','Total service cost (PHP)','number','0','min="0" step="0.01" max="100000000" required')+'</div>'+
+        '<div class="field"><label for="f-shop-service-notes">Work performed, parts and details (optional)</label><textarea name="notes" id="f-shop-service-notes" maxlength="500" rows="4" placeholder="Actual completed work and any helpful information"></textarea></div>'+
+        '<p class="text-muted">Reports can only be submitted once per completed booking. Confirm the work and amount before sending.</p>';
+      submit='SEND REPORT TO RIDER';
+    }
+    else if(type==='review-service-report'){
+      record=state.serviceReports.find(x=>x.id===id);
+      if(!record||record.status!=='Pending')return toast('This report is already reviewed or unavailable.');
+      title='Review Workshop Report';
+      subtitle='Review the work and cost before deciding whether to add this report to your private service history.';
+      const bike=state.bikes.find(x=>x.id===record.bikeId);
+      const components=bike?activeComps(bike.id).map(c=>[c.id,c.name]):[];
+      fields='<div class="shared-report-preview"><div><strong>Workshop</strong><span>'+esc(record.shopName)+'</span></div>'+
+        '<div><strong>Motorcycle</strong><span>'+esc(record.bikeModel)+'</span></div>'+
+        '<div><strong>Work</strong><span>'+esc(record.service)+'</span></div>'+
+        '<div><strong>Date</strong><span>'+niceDate(record.serviceDate)+'</span></div>'+
+        '<div><strong>Cost</strong><span>'+cash(record.cost)+'</span></div>'+
+        (record.notes?'<div><strong>Shop details</strong><span>'+esc(record.notes)+'</span></div>':'')+'</div>'+
+        selectField('decision','Your decision',[['Accepted','Accept and import into my history'],['Declined','Decline without importing']],'Accepted')+
+        selectField('componentId','Optional component to update its reminder',[['','Do not update a maintenance reminder'],...components],'',false)+
+        '<p class="text-muted">Nothing is imported until you accept. If you choose a component, its next service date may be recalculated. Your full history remains private.</p>';
+      submit='SAVE MY DECISION';
+    }
+    else if(type==='share-service'){
+      record=state.services.find(x=>x.id===id);
+      if(!record)return toast('The service entry was not found.');
+      const connected=(state.connections||[]).filter(x=>x.status==='accepted'&&!state.serviceShares.some(s=>s.serviceId===id&&s.shopId===x.shopId));
+      if(!connected.length)return toast('Connect a workshop first, or revoke an existing share before sharing this entry again.');
+      const model=state.bikes.find(x=>x.id===record.bikeId)?.model||'Motorcycle';
+      title='Share Selected Service Entry';
+      subtitle='Only the workshop you choose will be able to view this specific service record. You can revoke access later.';
+      fields='<div class="shared-report-preview">'+
+        '<div><strong>Motorcycle</strong><span>'+esc(model)+'</span></div>'+
+        '<div><strong>Service</strong><span>'+esc(record.type)+'</span></div>'+
+        '<div><strong>Date</strong><span>'+niceDate(record.date)+'</span></div>'+
+        '<div><strong>Cost</strong><span>'+cash(record.cost)+'</span></div>'+
+        '<div><strong>Recorded shop</strong><span>'+esc(record.shop)+'</span></div>'+
+        '<div><strong>Notes</strong><span>'+esc(record.notes||'No notes')+'</span></div></div>'+
+        selectField('shopId','Share only with',connected.map(x=>[x.shopId,x.shopName]),connected[0].shopId)+
+        '<p class="text-muted">This shares the displayed details, including cost and notes. Other private maintenance entries are not shared.</p>';
+      submit='SHARE THIS ENTRY';
+    }
     else if(type==='add-appointment'||type==='edit-appointment'){if(!state.customers.length)return toast('Add a customer before booking.');record=type==='edit-appointment'?state.appointments.find(a=>a.id===id):null;title=record?'Edit Appointment':'Book Appointment';subtitle='Schedule and update a customer visit.';fields=`${selectField('customerId','Customer',state.customers.map(c=>[c.id,c.name+' • '+c.motorcycle]),record?.customerId)}${field('service','Requested service','text',record?.service||'','required maxlength="100"')}<div class="form-grid">${field('date','Date','date',record?.date||dateShift(1),'required')}${field('time','Time','time',record?.time||'09:00','required')}</div>${record?selectField('status','Appointment status',['Pending','Confirmed','Completed','Cancelled'],record.status):''}`;submit=record?'SAVE APPOINTMENT':'BOOK APPOINTMENT';}
     else return;
     lastFocus=document.activeElement;
@@ -523,6 +574,21 @@
       await persist('/rider-appointments/'+encodeURIComponent(id),'PATCH',
         {status:v.status,reviewNote:v.reviewNote||''},'Rider booking updated to '+v.status+'.');return;
     }
+    if(type==='submit-service-report'){
+      await persist('/service-reports','POST',
+        {appointmentId:id,service:v.service,serviceDate:v.serviceDate,cost:Number(v.cost),notes:v.notes||''},
+        'Service report sent to rider for review.');return;
+    }
+    if(type==='review-service-report'){
+      const payload={decision:v.decision};
+      if(v.decision==='Accepted'&&v.componentId)payload.componentId=v.componentId;
+      await persist('/service-reports/'+encodeURIComponent(id),'PATCH',payload,
+        v.decision==='Accepted'?'Workshop service imported into your history.':'Workshop service report declined.');return;
+    }
+    if(type==='share-service'){
+      await persist('/service-shares','POST',{serviceId:id,shopId:v.shopId},
+        'This service entry is now shared with the selected workshop.');return;
+    }
     if(type==='add-appointment'||type==='edit-appointment'){await persist(type==='edit-appointment'?'/appointments/'+encodeURIComponent(id):'/appointments',type==='edit-appointment'?'PATCH':'POST',{customerId:v.customerId,service:v.service,date:v.date,time:v.time,status:v.status},type==='edit-appointment'?'Appointment updated.':'Appointment booked.');return;}
   }
   function downloadCsv(name,rows){if(!rows.length){toast('No records to export.');return;}const keys=Object.keys(rows[0]);const csv=[keys.join(','),...rows.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))].join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);toast('CSV export prepared.');}
@@ -537,7 +603,7 @@
     if(a==='switch-role'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;state.role=el.dataset.role;mobileOpen=false;notifyOpen=false;navigate('/login');toast('Sign in with a '+(state.role==='shop'?'workshop':'rider')+' account to switch.');}catch(error){toast(error.message);}return;}
     if(a==='notifications'){notifyOpen=!notifyOpen;render();return;}
     if(a==='logout'){try{await api('/auth/logout','POST');shopResults=null;shopFilters={query:'',city:'',service:''};state.session=null;mobileOpen=false;notifyOpen=false;navigate('/');toast('Signed out successfully.');}catch(error){toast(error.message);}return;}
-    if(['add-bike','edit-bike','add-component','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment','request-appointment','review-rider-booking'].includes(a)){openModal(a,id);return;}
+    if(['add-bike','edit-bike','add-component','edit-component','log-service','add-customer','edit-customer','add-job','edit-job','add-appointment','edit-appointment','request-appointment','review-rider-booking','submit-service-report','review-service-report','share-service'].includes(a)){openModal(a,id);return;}
     if(a==='archive-component'||a==='restore-component'){
       const archived=a==='archive-component';
       if(archived&&!confirm('Archive this component? Its reminders will be paused, and you can restore it later.'))return;
@@ -558,6 +624,10 @@
     if(a==='cancel-rider-appointment'){
       if(!confirm('Cancel this appointment? The workshop will see the cancellation in its appointment queue.'))return;
       await persist('/rider-appointments/'+encodeURIComponent(id),'PATCH',{status:'Cancelled'},'Appointment request cancelled.',{close:false});return;
+    }
+    if(a==='revoke-service-share'){
+      if(!confirm('Revoke the workshop\'s access to this shared service entry?'))return;
+      await persist('/service-shares/'+encodeURIComponent(id),'DELETE',undefined,'Workshop access revoked.',{close:false});return;
     }
     if(a==='advance-job'){const j=state.jobs.find(x=>x.id===id);if(j)await persist('/jobs/'+encodeURIComponent(id),'PATCH',{status:j.status==='Pending'?'In Progress':'Completed'},'Job status updated.',{close:false});return;}
     if(a==='confirm-appointment'||a==='complete-appointment'){await persist('/appointments/'+encodeURIComponent(id),'PATCH',{status:a==='complete-appointment'?'Completed':'Confirmed'},'Appointment status updated.',{close:false});return;}
