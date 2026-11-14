@@ -144,9 +144,8 @@
       'RIDE SMART. MAINTAIN BETTER.'
     ];
     const content=messages.map(message=>`<span class="ticker-item">${message}</span><span class="sep" aria-hidden="true">✦</span>`).join('');
-    // Two identical copies let the track wrap at -50% without disappearing or jumping.
-    // The duplicate is decorative and hidden from assistive technology.
-    return `<div class="ticker" aria-label="MotoKare system information"><div class="ticker-track"><div class="ticker-copy">${content}</div><div class="ticker-copy" aria-hidden="true">${content}</div></div></div>`;
+    // Classic marquee: one line enters from the right, exits left, then restarts.
+    return `<div class="ticker" aria-label="MotoKare system information"><div class="ticker-track"><div class="ticker-copy">${content}</div></div></div>`;
   }
   function landingHeader(){return `<header class="site-header"><div class="container nav-inner">${logo()}<nav class="nav-links" id="site-nav" aria-label="Main navigation"><a href="#/" data-scroll="home">Home</a><a href="#/features" data-scroll="features">Features</a><a href="#/roles" data-scroll="roles">Who It's For</a><a href="#/how" data-scroll="how">How It Works</a><a href="#/pricing" data-scroll="pricing">Pricing</a></nav><div class="nav-actions"><a class="button ghost small" href="#/login">Log In</a><a class="button small primary" href="#/register">Get Started ${icon('arrow')}</a><button class="nav-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-action="mobile-nav">${icon('menu')}</button></div></div></header>`;}
   function landing(){
