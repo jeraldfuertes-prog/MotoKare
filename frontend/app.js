@@ -686,7 +686,7 @@
           notifyOpen=false;await refresh();
           if(item.route.startsWith('/'+state.role+'/'))navigate(item.route);
         }else{
-          await persist('/notification-inbox/'+encodeURIComponent(id),'PATCH',{read:!!item.readAt},
+          await persist('/notification-inbox/'+encodeURIComponent(id),'PATCH',{read:!item.readAt},
             item.readAt?'Notification marked unread.':'Notification marked read.',{close:false});
         }
       }catch(err){toast(err.message);}return;
